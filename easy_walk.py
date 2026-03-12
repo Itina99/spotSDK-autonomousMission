@@ -891,21 +891,21 @@ def easy_walk(options):
         # Create first waypoint in initial cell (0, 0)
         recordingInterface.create_default_waypoint(cell_row=0, cell_col=0)
 
-        env = environmentMap.EnvironmentMap(rows=4, cols=4, cell_size=1.5)
+        env = environmentMap.EnvironmentMap(rows=10, cols=10, cell_size=1.5)
         x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
 
+
+        #TODO: guarda cosa succede modificando questo
         yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
                               1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
 
-        # Arrotondiamo lo yaw al multiplo di 90° (pi/2) più vicino.
-        # Mantiene i quadrati dritti sul grafico, ma fa espandere la griglia in avanti rispetto al robot.
-        snapped_yaw = round(yaw_boot / (np.pi / 2.0)) * (np.pi / 2.0)
+        fixed_yaw = 0.0
 
-        env.set_origin(x_boot, y_boot, snapped_yaw, start_row=0, start_col=0)
+        env.set_origin(x_boot, y_boot, fixed_yaw, start_row=0, start_col=0)
 
         print(f'[INIT] Boot position: x={x_boot:.3f}, y={y_boot:.3f}, z={z_boot:.3f}')
         print(
-            f'[INIT] Boot orientation: reale {np.rad2deg(yaw_boot):.1f}° -> allineata alla griglia: {np.rad2deg(snapped_yaw):.1f}°')
+            f'[INIT] Boot orientation: reale {np.rad2deg(yaw_boot):.1f}° -> allineata alla griglia: {np.rad2deg(fixed_yaw):.1f}°')
 
 
         mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
@@ -983,7 +983,19 @@ def easy_walk(options):
 
                     # Get current position
                     x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
-                    current_row, current_col = env.get_cell_from_world(x_current, y_current)
+
+                    # Determine current cell via nearest waypoint lookup (drift-safe).
+                    # Using the waypoint→cell registry avoids recomputing the cell from
+                    # raw world coordinates, which can give wrong results when there is
+                    # odometry / localization drift.
+                    wp_cell = recordingInterface.get_cell_from_nearest_waypoint(x_current, y_current)
+                    if wp_cell is not None:
+                        current_row, current_col = wp_cell
+                        print(f"[PATH_OPTIMIZE] Current cell from nearest waypoint: ({current_row},{current_col})")
+                    else:
+                        # Fallback: geometric computation (less reliable under drift)
+                        current_row, current_col = env.get_cell_from_world(x_current, y_current)
+                        print(f"[PATH_OPTIMIZE] Current cell from geometry (fallback): ({current_row},{current_col})")
 
                     # Use grid-based path optimization to find shortest path
                     print(f"\n[PATH_OPTIMIZE] Finding optimized path from ({current_row},{current_col}) to ({target_row},{target_col})")
@@ -1045,34 +1057,41 @@ def easy_walk(options):
                             print(f"[NAV] Target cell is adjacent - no navigation needed, attempting direct entry")
 
                         # Navigate through waypoints (stop BEFORE target cell)
-                        navigation_success = True
-                        for i, waypoint_name in enumerate(waypoints_to_navigate, 1):
-                            print(f"\n[NAV] Step {i}/{len(waypoints_to_navigate)}: Navigating to {waypoint_name}")
+                        # navigation_success = True
+                        # for i, waypoint_name in enumerate(waypoints_to_navigate, 1): #FIXME: qui scorre tutti i waypoint fino ad arrivare nel punto di arrivo ma non va bene
+                        #     print(f"\n[NAV] Step {i}/{len(waypoints_to_navigate)}: Navigating to {waypoint_name}")
+                        #
+                        #     # Find waypoint data
+                        #     waypoint_data = None
+                        #     for cell, wp_data in waypoints_by_cell.items():
+                        #         if wp_data['name'] == waypoint_name:
+                        #             waypoint_data = wp_data
+                        #             break
+                        #
+                        #     if waypoint_data:
+                        #         success = recordingInterface.navigate_to_waypoint(
+                        #             waypoint_data['id'],
+                        #             robot_state_client
+                        #         )
+                        #
+                        #         if success:
+                        #             #recordingInterface.realign_robot_to_waypoint_orientation(waypoint_data['name'])
+                        #             print(f"[NAV] Reached {waypoint_name}")
+                        #         else:
+                        #             print(f"[NAV] Failed to reach {waypoint_name}")
+                        #             navigation_success = False
+                        #             break
+                        #     else:
+                        #         print(f"[NAV] ERROR: Waypoint data not found for {waypoint_name}")
+                        #         navigation_success = False
+                        #         break
 
-                            # Find waypoint data
-                            waypoint_data = None
-                            for cell, wp_data in waypoints_by_cell.items():
-                                if wp_data['name'] == waypoint_name:
-                                    waypoint_data = wp_data
-                                    break
-
-                            if waypoint_data:
-                                success = recordingInterface.navigate_to_waypoint(
-                                    waypoint_data['id'],
-                                    robot_state_client
-                                )
-
-                                if success:
-                                    recordingInterface.realign_robot_to_waypoint_orientation(waypoint_data['name'])
-                                    print(f"[NAV] Reached {waypoint_name}")
-                                else:
-                                    print(f"[NAV] Failed to reach {waypoint_name}")
-                                    navigation_success = False
-                                    break
-                            else:
-                                print(f"[NAV] ERROR: Waypoint data not found for {waypoint_name}")
-                                navigation_success = False
+                        waypoint_data = None
+                        for cell, wp_data in waypoints_by_cell.items():
+                            if wp_data['name'] == path_result['last_waypoint']:
+                                waypoint_data = wp_data
                                 break
+                        navigation_success = recordingInterface.navigate_to_waypoint(waypoint_data['id'], robot_state_client)
 
                         if navigation_success:
                             # Resume recording at target waypoint
@@ -1110,6 +1129,8 @@ def easy_walk(options):
                             print(f"[ERROR] Navigation failed along optimized path")
                             # IMPORTANT: Resume recording even in case of failure
                             recordingInterface.start_recording()
+                            movements.relative_move(-0.5, 0, 0, "vision",
+                                          command_client, robot_state_client)
                             # Remove from frontier
                             frontier.remove((target_row, target_col, rank))
                     else:
@@ -1129,7 +1150,12 @@ def easy_walk(options):
 
         # Create final waypoint (current robot position)
         x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
-        final_row, final_col = env.get_cell_from_world(x_final, y_final)
+        # Use drift-safe cell lookup first; fall back to geometry if no waypoints yet
+        _wp_cell_final = recordingInterface.get_cell_from_nearest_waypoint(x_final, y_final)
+        if _wp_cell_final is not None:
+            final_row, final_col = _wp_cell_final
+        else:
+            final_row, final_col = env.get_cell_from_world(x_final, y_final)
         recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
         recordingInterface.get_recording_status()
         # Note: Edges are created during path optimization, no need for create_new_edge
@@ -1145,18 +1171,19 @@ def easy_walk(options):
         print(f"[RETURN_OPTIMIZE] Optimizing return path to base (wp_0)")
         print(f"{'='*70}")
 
-        # Get current position and find optimal path back to start
-        x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
-        current_row, current_col = env.get_cell_from_world(x_current, y_current)
-        start_row, start_col = 0, 0  # wp_0 is at cell (0,0)
-
-        print(f"[RETURN_OPTIMIZE] Current position: cell ({current_row},{current_col})")
-        print(f"[RETURN_OPTIMIZE] Target: wp_0 at cell ({start_row},{start_col})")
+        # Determine return-path start cell via nearest waypoint (drift-safe)
+        _wp_cell_return = recordingInterface.get_cell_from_nearest_waypoint(x_final, y_final)
+        if _wp_cell_return is not None:
+            return_start_row, return_start_col = _wp_cell_return
+        else:
+            return_start_row, return_start_col = final_row, final_col
+        print(f"[RETURN_OPTIMIZE] Current position: cell ({return_start_row},{return_start_col})")
+        print(f"[RETURN_OPTIMIZE] Target: wp_0 at cell (0,0)")
 
         # Find optimal path back to start
         return_path_result = recordingInterface.find_and_optimize_path(
-            start_cell=(current_row, current_col),
-            end_cell=(start_row, start_col),
+            start_cell=(return_start_row, return_start_col),
+            end_cell=(0, 0),
             env_map=env,
             create_missing_edges=True  # Create edges if needed
         )

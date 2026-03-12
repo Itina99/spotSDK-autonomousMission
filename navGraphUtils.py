@@ -937,6 +937,71 @@ class RecordingInterface(object):
             print(f"[REALIGN] ✗ Error during rotation: {e}")
             return False
 
+    def get_cell_from_nearest_waypoint(self, robot_x, robot_y):
+        """
+        Find the nearest manual waypoint to the robot's current position and return
+        the grid cell that was associated with it when it was created.
+
+        This is the RELIABLE way to determine the robot's current cell because it
+        uses the pre-recorded waypoint→cell mapping instead of re-computing the cell
+        from the raw world position (which is prone to drifting errors).
+
+        Workflow:
+            1. Iterate over ``waypoint_poses`` (all manually-created waypoints).
+            2. Compute the Euclidean distance from (robot_x, robot_y) to each waypoint.
+            3. Return the cell (row, col) stored for the closest waypoint.
+
+        Args:
+            robot_x (float): Robot X position in world frame.
+            robot_y (float): Robot Y position in world frame.
+
+        Returns:
+            tuple or None: (row, col) grid cell associated with the nearest waypoint,
+                           or ``None`` if no waypoint with cell data exists yet.
+
+        Example::
+
+            x, y, _, _ = spotUtils.getPosition(robot_state_client)
+            current_cell = recordingInterface.get_cell_from_nearest_waypoint(x, y)
+            if current_cell is not None:
+                current_row, current_col = current_cell
+        """
+        import math
+
+        print(f"\n[WP_CELL] get_cell_from_nearest_waypoint({robot_x:.3f}, {robot_y:.3f})")
+
+        best_name = None
+        best_distance = float('inf')
+
+        for wp_name, wp_data in self.waypoint_poses.items():
+            # Only manual waypoints in wp_N format
+            if not (wp_name.startswith('wp_') and len(wp_name.split('_')) == 2):
+                continue
+
+            # Must have cell information
+            if wp_data.get('cell_row') is None or wp_data.get('cell_col') is None:
+                continue
+
+            wp_x = wp_data['x']
+            wp_y = wp_data['y']
+            dist = math.sqrt((wp_x - robot_x) ** 2 + (wp_y - robot_y) ** 2)
+
+            print(f"  {wp_name}: pos=({wp_x:.3f}, {wp_y:.3f}) "
+                  f"cell=({wp_data['cell_row']},{wp_data['cell_col']}) dist={dist:.3f}m")
+
+            if dist < best_distance:
+                best_distance = dist
+                best_name = wp_name
+
+        if best_name is None:
+            print("[WP_CELL] ⚠️  No manual waypoint with cell data found in waypoint_poses")
+            return None
+
+        best_data = self.waypoint_poses[best_name]
+        cell = (best_data['cell_row'], best_data['cell_col'])
+        print(f"[WP_CELL] ✓ Nearest waypoint: {best_name} at {best_distance:.3f}m -> cell {cell}")
+        return cell
+
     def get_all_manual_waypoints_with_cells(self):
         """
         Get all manual waypoints that have cell information saved.
@@ -1394,7 +1459,8 @@ class RecordingInterface(object):
             'waypoint_names': None,
             'missing_edges': [],
             'edges_created': [],
-            'target_cell_has_waypoint': False
+            'target_cell_has_waypoint': False,
+            'last_waypoint':''
         }
 
         # Step 1: Get all waypoints with cell data
@@ -1438,7 +1504,7 @@ class RecordingInterface(object):
                 waypoint_names.append(waypoints_by_cell[cell]['name'])
             else:
                 print(f"[PATH_OPTIMIZE] WARNING: No waypoint for cell {cell} in path")
-
+        result['last_waypoint'] = waypoint_names[-1]
         result['waypoint_names'] = waypoint_names
 
         # Step 3: Verify edges (considering all waypoints for indirect paths)
