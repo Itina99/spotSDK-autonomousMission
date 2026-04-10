@@ -1,99 +1,200 @@
 # Spot Sim: ROS 2 & Gazebo Ignition Setup
 
-Questo repository contiene la configurazione per simulare il robot Boston Dynamics **Spot** utilizzando **ROS 2 Humble** e **Gazebo Ignition Fortress**.
+Questa guida ti accompagna passo passo nella simulazione del robot Boston Dynamics **Spot** con **ROS 2 Humble** e **Gazebo Ignition Fortress**.
 
 ## 1. Requisiti di Sistema
-* **OS:** Ubuntu 22.04 LTS
-* **ROS 2:** Humble Hawksbill
-* **Simulatore:** Gazebo Ignition Fortress
+- **OS:** Ubuntu 22.04 LTS
+- **ROS 2:** Humble
+- **Simulatore:** Gazebo Ignition Fortress
+- **Strumenti base:** `git`, `python3`, `colcon`
+
+> Nota: se non hai ancora `colcon`, lo installerai nel passo 3.
 
 ---
 
-## 2. Installazione Dipendenze
-
-Per prima cosa, installa i pacchetti necessari per la visione e l'integrazione tra ROS e OpenCV (assicurandoti di avere Conda disattivato):
+## 2. Installa le dipendenze ROS + OpenCV
+In un terminale **senza Conda attivo**, installa i pacchetti necessari:
 
 ```bash
 sudo apt update
 sudo apt install python3-opencv ros-humble-cv-bridge ros-humble-vision-msgs
 ```
 
-## 3. Setup del Workspace
+---
 
-Clonazione e compilazione dei driver e dei modelli per Spot:
+## 3. Crea il workspace e compila
+1. Crea il workspace e clona il repository della simulazione:
 
 ```bash
-# Crea la cartella del workspace
 mkdir -p ~/spot_sim_ws/src
 cd ~/spot_sim_ws/src
 
-# Clona il repository ufficiale della simulazione
+# Repository ufficiale della simulazione
 git clone https://github.com/g1y5x3/spot_gazebo_ros2.git
+```
 
-# Torna nella root e compila
+2. Torna nella root del workspace e compila:
+
+```bash
 cd ~/spot_sim_ws
 colcon build --symlink-install
 ```
 
-## 4. Configurazione Ambiente (Source)
+Se `colcon` non è installato:
 
-Per far sì che il terminale riconosca ROS 2 e i pacchetti di Spot appena compilati, esegui sempre questi comandi in ogni nuovo terminale:
+```bash
+sudo apt install python3-colcon-common-extensions
+```
+
+---
+
+## 4. Source dell'ambiente
+Ogni nuovo terminale deve conoscere ROS 2 e il workspace compilato.
 
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/spot_sim_ws/install/setup.bash
 ```
 
-Consiglio: aggiungi queste righe in fondo al tuo file `~/.bashrc` per non doverle scrivere ogni volta che apri un terminale.
-
-## 5. Configurazione del Mondo (SDF)
-
-Il file del mondo originale conteneva troppi oggetti (tunnel, barriere). Abbiamo creato un file pulito chiamato `mondo_pulito.sdf` che contiene solo l'essenziale per far funzionare Spot senza farlo cadere nel vuoto:
-
-* Un Ground Plane (pavimento)
-* Una Luce Direzionale (Sole)
-* Il modello di Spot inserito direttamente nel mondo (`<model name="spot">`)
-
-Il file si trova al percorso: `~/spot_sim_ws/mondo_pulito.sdf`
-
-## 6. Lancio della Simulazione
-
-Per avviare Gazebo con il mondo pulito e lo spawner di ROS attivo:
-
+Questo solo per me
 ```bash
-ros2 launch spot_bringup spot.gazebo.launch.py world_file:=~/spot_sim_ws/mondo_pulito.sdf
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
 ```
 
-## 7. Comandi di Movimento (Hello World)
+Suggerimento: aggiungi queste righe in fondo a `~/.bashrc` per renderle permanenti.
 
-### Test rapido da Terminale
+---
 
-Fallo camminare in cerchio per verificare che i controller dei motori stiano ricevendo input:
+## 5. Avvio della simulazione
+### Avvio con mondo di default
+
+```bash
+ros2 launch spot_bringup spot.gazebo.launch.py
+```
+
+### Avvio con mondo personalizzato
+
+```bash
+ros2 launch spot_bringup spot.gazebo.launch.py world_file:=~/spot_sim_ws/percorso_al_file_sdf/custom_world.sdf
+```
+
+Nel mio caso
+```bash
+ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
+```
+---
+
+## 6. Comandi di movimento (Hello World)
+### Test rapido da terminale
+Verifica che i controller ricevano input con una camminata in cerchio:
 
 ```bash
 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.4}}"
 ```
 
-### Esecuzione Script Python (ROS 2)
+### Esecuzione script Python (ROS 2)
+Abbiamo tradotto lo script "Hello Spot" in un nodo ROS 2 puro (`hello_spot_ros.py`).
 
-Abbiamo tradotto lo script "Hello Spot" originale in un nodo ROS 2 puro (`hello_spot_ros.py`).
+1. Assicurati che Conda sia disattivato:
 
-* Assicurati che Conda sia disattivato (`conda deactivate`)
-* Esegui il source degli ambienti (vedi punto 4)
-* Lancia lo script:
+```bash
+conda deactivate
+```
+
+2. Esegui il source degli ambienti (vedi punto 4).
+3. Lancia lo script:
 
 ```bash
 python3 hello_spot_ros.py
 ```
 
-Lo script eseguirà una sequenza preimpostata:
+Lo script esegue una sequenza preimpostata:
+- Rotazione sul posto
+- Avanzamento dritto
+- Scatto e salvataggio di un'immagine dalla telecamera termica simulata (`hello_spot_ros_image.jpg`)
 
-* Rotazione sul posto
-* Avanzamento dritto
-* Scatto e salvataggio di un'immagine dalla telecamera termica simulata (`hello_spot_ros_image.jpg`)
+---
 
-## Note Importanti e Risoluzione Problemi
+## 7. Avvio completo Navigazione Autonoma (SLAM + TF Bridge + Algoritmo)
+Per lanciare l'algoritmo completo di mappatura e navigazione servono 4 terminali.
+In **ogni** terminale ricordati di disattivare Conda e fare il source:
 
-* **Conda vs ROS 2:** Non mischiare mai ambienti Conda con script ROS 2. Conda sovrascrive i percorsi delle librerie di sistema (come OpenCV e C++) causando errori di compilazione o Segmentation Fault in `cv_bridge`.
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+```
 
-* **PyCharm IDE:** Se usi PyCharm e ricevi l'errore `ModuleNotFoundError: No module named 'rclpy'`, assicurati di aver fatto il source nel terminale di PyCharm e di aver impostato l'interprete su System Interpreter (`/usr/bin/python3`), disattivando l'ambiente virtuale (venv) generato automaticamente dall'IDE.
+### Terminale 1: Lancio di Gazebo
+Avvia la simulazione con il mondo desiderato:
+
+```bash
+ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
+```
+
+### Terminale 2: Ponte Odometria - TF
+Collega l'odometria di Gazebo all'albero delle trasformazioni (necessario per lo SLAM):
+
+```bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+python3 odom_to_tf.py --ros-args -p use_sim_time:=true
+```
+
+### Terminale 3: SLAM Toolbox
+Genera la mappa 2D (OccupancyGrid) processando in tempo reale i dati del Lidar:
+
+```bash
+ros2 run slam_toolbox async_slam_toolbox_node --ros-args -p use_sim_time:=true -r scan:=/spot/lidar/scan -p odom_frame:=odom_spot -p base_frame:=base_link
+```
+*(Attendi che compaia "Registering sensor: [Custom Described Lidar]")*
+
+### Terminale 4: Algoritmo di Esplorazione
+*(Opzionale: muovi prima leggermente il robot da un altro terminale o sblocca la visione per creare i primi metri liberi sulla mappa, altrimenti l'algoritmo potrebbe identificare le celle adiacenti come muri non esplorati)*
+Lancia la vera e propria missione autonoma:
+
+```bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+python3 -m spot_ros.easy_walk_ros --ros-args -p odom_topic:=/spot/odometry -p use_sim_time:=true
+```
+
+### Alternativa: launch unico per TF + SLAM + RViz
+Se preferisci evitare l'avvio manuale di TF bridge, SLAM e RViz in terminali separati, puoi usare il launch file del progetto.
+
+Questa alternativa mantiene la stessa logica ma con sequenza automatica:
+1. `odom_to_tf.py`
+2. `slam_toolbox`
+3. `rviz2` (solo dopo la prima mappa su `/map`)
+
+In ogni terminale, prima fai comunque:
+
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+```
+
+#### Terminale A: Gazebo
+```bash
+ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
+```
+
+#### Terminale B: Launch orchestrato (TF bridge + SLAM + RViz)
+```bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+ros2 launch launch_exploration.launch.py
+```
+
+#### Terminale C: Algoritmo di Esplorazione
+```bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+python3 -m spot_ros.easy_walk_ros --ros-args -p odom_topic:=/spot/odometry -p use_sim_time:=true
+```
+
+Nota: con questa modalità è normale che RViz non appaia immediatamente; viene avviato solo quando il nodo di attesa riceve la prima `OccupancyGrid` su `/map`.
+
+Se resta in attesa troppo a lungo:
+- verifica che Gazebo stia pubblicando `/spot/lidar/scan`
+- verifica che SLAM Toolbox sia partito correttamente
+- muovi Spot per qualche secondo per generare le prime celle di mappa
+
