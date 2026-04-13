@@ -4,7 +4,10 @@ import time
 from time import sleep
 from datetime import datetime
 import numpy as np
+from types import SimpleNamespace
 
+# --- Import SDK Boston Dynamics ---
+# (Rimangono attivi perché il codice usa costanti o tipi definiti qui dentro)
 import bosdyn.client
 import bosdyn.client.lease
 import bosdyn.client.util
@@ -13,13 +16,29 @@ from bosdyn.client.frame_helpers import *
 from bosdyn.client.robot_command import (RobotCommandBuilder, RobotCommandClient, blocking_stand)
 from bosdyn.client.local_grid import LocalGridClient
 from bosdyn.client.frame_helpers import get_a_tform_b
-from types import SimpleNamespace
-import navGraphUtils
-import movements
-import spotGrid
-import spotLogInUtils
+
+# --- Modulo Logico (Indipendente dall'hardware) ---
 import environmentMap
-import spotUtils
+
+# ==========================================
+#   SWITCH: SIMULAZIONE vs ROBOT REALE
+# ==========================================
+SIMULATION_MODE = True  # <--- Metti False quando sei connesso al robot vero!
+
+if SIMULATION_MODE:
+    print("🚀 [INIT] Avvio in SIMULATION MODE. Caricamento moduli MOCK...")
+
+
+else:
+    print("🤖 [INIT] Avvio in REAL ROBOT MODE. Connessione all'SDK in corso...")
+    import navGraphUtils
+    import movements
+    import spotGrid
+    import spotLogInUtils
+    import spotUtils
+
+
+# ==========================================
 
 # TODO: check if we can avoid to set a sleep after each movement command
 # TODO: change the folder destination of the name download of graph

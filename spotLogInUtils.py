@@ -16,10 +16,7 @@ def setLogInfo(options):
     lease_client = robot.ensure_client(bosdyn.client.lease.LeaseClient.default_service_name)
     robot_state_client = robot.ensure_client(RobotStateClient.default_service_name)
     session_name = options.recording_session_name
-    if session_name == '':
-        session_name = os.path.basename(
-            '/Users/gianmariagennai/Documents/Unifi/Magistrale/spot/autowalk/TestAuto'
-        )
+
     user_name = options.recording_user_name
     if user_name == '':
         user_name = robot._current_user

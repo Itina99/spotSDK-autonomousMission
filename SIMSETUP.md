@@ -17,7 +17,7 @@ In un terminale **senza Conda attivo**, installa i pacchetti necessari:
 
 ```bash
 sudo apt update
-sudo apt install python3-opencv ros-humble-cv-bridge ros-humble-vision-msgs
+sudo apt install python3-opencv ros-humble-cv-bridge ros-humble-vision-msgs ros-humble-ros-gz
 ```
 
 ---
