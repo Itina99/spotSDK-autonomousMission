@@ -273,7 +273,25 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
     y = pts[:, 1]
     PADDING_THRESHOLD = 0.15
     colors_norm = np.zeros((len(cells_obstacle_dist), 3), dtype=np.float32)
-    obstacle_mask = cells_obstacle_dist < 0.0
+    obstacle_mask = cells_obstacle_dist < 0.0def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, robot_y,
+                                   candidates, chosen_point, iteration, env=None, save_path=None):
+    """
+    Visualize the obstacle-distance grid with sampled candidates and chosen point.
+    Color scheme from obstacle_distance:
+      - red:   dist < 0.0 (inside obstacle)
+      - green: 0.0 <= dist < 0.33 (padding region)
+      - blue:  dist >= 0.33 (free/passable)
+    Optionally overlay global grid map (only cells visible within local grid bounds).
+
+    Args:
+        save_path: If provided, save the figure to this path
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+
+    # Plot local grid points with explicit obstacle/padding/free c
     padding_mask = (cells_obstacle_dist >= 0.0) & (cells_obstacle_dist < PADDING_THRESHOLD)
     free_mask = cells_obstacle_dist >= PADDING_THRESHOLD
     colors_norm[obstacle_mask] = [1.0, 0.0, 0.0]  # red

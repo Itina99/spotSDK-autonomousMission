@@ -1,389 +1,285 @@
-# Spiegazione dettagliata dell'algoritmo di esplorazione autonoma
+# Algoritmo Dettagliato (ROS) - Run passo passo
 
-## 1) Obiettivo del progetto
+Questo documento descrive in modo operativo come funziona **una run tipica** del nodo `spot_ros/easy_walk_ros.py`.
 
-Questo progetto implementa una missione di esplorazione autonoma per Spot basata su:
-
-- una **griglia globale** (celle visitate/bloccate/sconosciute),
-- una **mappa locale ostacoli** derivata dal Local Grid service,
-- una **strategia frontier + ranking serpentino** per scegliere la prossima cella,
-- integrazione con **GraphNav** per creare waypoint e gestire navigazione di ritorno/riconnessione.
-
-L'orchestrazione principale e' in `easy_walk.py` (funzione `easy_walk`).
+L'obiettivo e' farti seguire il comportamento reale del codice, dalla partenza fino al rientro, con tutte le decisioni importanti.
 
 ---
 
-## 2) Architettura logica (componenti principali)
+## 1) Obiettivo della run
 
-- `easy_walk.py`
-  - ciclo principale di esplorazione;
-  - selezione target;
-  - campionamento punti nella cella;
-  - comandi di movimento e aggiornamento stato missione.
+Il nodo `EasyWalkROS` deve:
 
-- `environmentMap.py` (`EnvironmentMap`)
-  - rappresentazione griglia globale;
-  - conversioni world <-> cell;
-  - ranking serpentino e gestione frontiera;
-  - stato celle (`0` sconosciuta, `1` visitata, `-1` bloccata).
-
-- `spotGrid.py`
-  - conversione dati Local Grid (`obstacle_distance`) in punti + valori + colori;
-  - trasformazione nel frame `VISION`.
-
-- `navGraphUtils.py` (`RecordingInterface`)
-  - controllo recording GraphNav;
-  - creazione waypoint manuali `wp_N`;
-  - download grafo e snapshot;
-  - navigazione a waypoint con gestione recovery (es. `STATUS_LOST`).
-
-- `movements.py`
-  - primitive di movimento relativo (`relative_move`) su traiettoria SE2.
-
-- `spotUtils.py`
-  - lettura posa robot in `VISION` (`getPosition`).
-
-- `spotLogInUtils.py`
-  - login SDK, lease, robot state client, metadata recording, E-Stop.
+1. ricevere mappa e posa,
+2. costruire/aggiornare una frontiera di celle da esplorare,
+3. scegliere una cella target,
+4. trovare un punto interno raggiungibile,
+5. muoversi in sicurezza (evitamento ostacoli),
+6. marcare la cella come visitata o bloccata,
+7. ripetere finche' la frontiera e' vuota,
+8. tornare al punto iniziale lungo il path registrato.
 
 ---
 
-## 3) Modello dati e convenzioni
+## 2) Sensori e dati usati durante la run
 
-### 3.1 Stato mappa globale
+Durante l'esecuzione il nodo usa contemporaneamente questi stream:
 
-In `EnvironmentMap.map`:
+- `/map` (`OccupancyGrid`): mappa globale (tipicamente da SLAM).
+- `odom_topic` (default `/odom`, nel tuo setup spesso `/spot/odometry`): odometria robot.
+- `local_obs_scan_topic` (default `/spot/lidar/scan`): osservazioni locali rapide.
+- opzionale `camera_local_grid_topic` (default `/spot/camera/local_obstacles`): griglia locale da pipeline camere.
 
-- `0` = cella non ancora testata,
-- `1` = cella visitata/accessibile,
-- `-1` = cella tentata ma bloccata.
+Dati interni principali:
 
-### 3.2 Origine e allineamento griglia
-
-L'origine viene fissata all'avvio missione (`env.set_origin`) usando la posa boot del robot:
-
-- `origin_x`, `origin_y` = posizione iniziale,
-- `origin_yaw` = orientamento iniziale,
-- `start_cell` = cella iniziale (tipicamente `(0,0)`).
-
-Le conversioni coordinate tengono conto di `origin_yaw`:
-
-- world -> grid: rotazione inversa,
-- grid -> world: rotazione diretta.
-
-### 3.3 Frame usati
-
-- `VISION`: frame principale per posizione robot, celle e waypoint salvati.
-- `BODY`: frame corpo robot (usato nelle trasformazioni).
-- `ODOM`: usato in GraphNav per localizzazione e trasformazioni interne.
-
-La coerenza su `VISION` e' centrale per confronti distanza (robot-target, waypoint-target).
+- `env` (`EnvironmentMap`): griglia logica celle visitate/bloccate.
+- `frontier`: lista celle candidate `(row, col, rank)`.
+- `pose_state` / `pose_state_odom`: posa robot in map/odom.
+- `self.current_map`: ultima occupancy grid ricevuta.
+- `_local_obs_points_map`: ostacoli locali recenti da scan.
 
 ---
 
-## 4) Flusso operativo completo della missione
+## 3) Run ipotetica completa (timeline reale)
 
-## 4.1 Inizializzazione
+Di seguito una run concreta simulata su griglia `5x5`, cella `2.0 m`.
 
-In `easy_walk.easy_walk(options)`:
+## T0 - Avvio nodo
 
-1. Login robot + lease + robot state (`spotLogInUtils.setLogInfo`).
-2. Setup E-Stop (`SimpleEstop`).
-3. Creazione `RecordingInterface` GraphNav.
-4. `stop_recording()` e `clear_map()` iniziali.
-5. Power on e stand (`blocking_stand`).
-6. `start_recording()`.
-7. Tentativo opzionale di localizzazione via fiducial (`initialize_with_fiducial`).
-8. Creazione primo waypoint `wp_0`.
-9. Inizializzazione `EnvironmentMap` e origine.
-10. Creazione cartelle missione (`MissionMap`, `graph`, `MissionLogs`).
-11. Generazione percorso serpentino (`generate_serpentine_path`).
+`main()`:
 
-## 4.2 Costruzione e gestione frontiera
+1. `rclpy.init()`
+2. crea `EasyWalkROS()`
+3. entra in `run()`
 
-La frontiera e' una lista di celle adiacenti esplorabili, arricchite con rank nel percorso serpentino:
+In `__init__` vengono creati:
 
-- `find_new_borders(...)` usa `env.get_adjacent_frontier_cells(...)`;
-- vengono aggiunte solo celle non visitate e non gia' in frontiera.
+- publisher: `cmd_vel`, `MarkerArray` per RViz,
+- subscriber: map, odom, scan, camera-local-grid,
+- controller di moto `movements_ros.MotionController`,
+- parametri di sicurezza (soglie occupancy, avoidance, timeout, retry).
 
-Scelta target:
+## T1 - Warm-up sensori
 
-- se ci sono celle adiacenti in frontiera -> si prende quella con **rank minimo**;
-- altrimenti -> si seleziona la migliore dalla frontiera globale (`get_lowest_rank_from_frontier_list`).
+`run()` chiama `wait_for_data()`:
 
-## 4.3 Tentativo di ingresso in cella (`attempt_enter_cell_from_position`)
+- finche' non arriva almeno una `/map`, il nodo aspetta.
+- se scade timeout -> termina con errore.
 
-Per entrare in una cella target:
+Intanto:
 
-1. legge la local grid `obstacle_distance`;
-2. converte la griglia in punti world (`create_vtk_obstacle_grid`);
-3. recupera posizione robot corrente;
-4. campiona punti candidati nella cella (`sample_cell_points`);
-5. valuta linea di vista robot->punto (`check_line_of_sight`);
-6. sceglie il candidato valido piu' vicino al centro cella (`find_best_point_in_cell`);
-7. ruota verso target e poi avanza (`movements.relative_move`);
-8. verifica finale: robot dentro la cella (`env.is_point_in_cell`).
+- `_on_odom()` aggiorna posa odom e prova a trasformarla in map.
+- `_on_map()` salva mappa e frame `map_frame`.
+- `_on_scan()` popola osservazione locale ostacoli in frame map.
 
-Se nessun punto e' raggiungibile, il tentativo fallisce.
+## T2 - Bootstrap missione
 
-## 4.4 Aggiornamento stato dopo successo
+Alla prima partenza valida:
 
-Quando l'ingresso riesce:
+1. crea `env = EnvironmentMap(rows=5, cols=5, cell_size=2.0)`.
+2. legge posa iniziale `(x_boot, y_boot, yaw_boot)`.
+3. `env.set_origin(...)` definisce allineamento mondo<->celle.
+4. aggiunge waypoint iniziale e posizione robot in `env`.
+5. genera path serpentino (`generate_serpentine_path`).
 
-- viene creato un nuovo waypoint manuale (`create_default_waypoint`),
-- viene aggiunta la posa waypoint in `env.waypoints`,
-- la cella viene marcata visitata (`mark_cell_visited`),
-- la frontiera viene aggiornata con nuovi adiacenti.
+## T3 - Prima frontiera
 
-## 4.5 Caso non adiacente: navigazione via waypoint
+- converte posizione robot in cella `(robot_row, robot_col)`.
+- prende adiacenti via `env.get_adjacent_frontier_cells(...)`.
+- li inserisce in `frontier` con `_merge_frontier(...)` evitando duplicati.
 
-Quando non ci sono celle frontiera adiacenti:
+Esempio:
 
-1. seleziona target a rank minimo dalla frontiera;
-2. ferma recording;
-3. ricava waypoints manuali con metadati cella;
-4. trova waypoint "piu' vicino" alla cella target (`find_nearest_waypoint_cell_to_target`);
-5. naviga al waypoint (`navigate_to_waypoint`);
-6. riavvia recording;
-7. tenta ingresso cella con la stessa procedura locale.
+- robot in `(0,0)`
+- frontiera iniziale: `[(0,1,rank=1), (1,0,rank=9)]`
 
-## 4.6 Chiusura missione
+## T4 - Inizio loop principale
 
-A frontiera vuota:
+Il loop `while rclpy.ok()` esegue sempre questa logica:
 
-- crea waypoint finale,
-- richiama loop closure (`auto_close_loops`),
-- stop recording,
-- ottimizza anchoring (`optimize_anchoring`),
-- ritorna a `wp_0` (`navigate_to_first_waypoint`),
-- sit + power off,
-- download completo grafo (`download_full_graph`).
+1. se `frontier` vuota -> fine missione.
+2. ricalcola cella attuale robot.
+3. trova celle di frontiera **adiacenti ora**.
+4. se esistono adiacenti -> sceglie quella con rank minimo.
+5. altrimenti -> fallback: prende la migliore globale da frontier.
 
 ---
 
-## 5) Metodologie usate (focus richiesto)
+## 4) Cosa succede dentro un tentativo di ingresso cella
 
-### 5.1 Frontier-based exploration con ranking serpentino
+Supponiamo scelga target `(0,1)`.
 
-La metodologia combina due idee:
+### Step A - Preparazione locale
 
-1. **Localita'**: priorita' alle celle adiacenti all'attuale posizione (espansione locale).
-2. **Ordine globale**: ranking della cella nel percorso serpentino per risolvere conflitti e ripartenze.
+`attempt_enter_cell(env, target_row, target_col)`:
 
-Vantaggi:
+1. costruisce `grid_helper` da `self.current_map`.
+2. legge posa robot corrente `(robot_x, robot_y)`.
+3. logga allineamento (`ALIGN_PRE`).
 
-- evita salti non necessari quando esiste continuita' locale;
-- mantiene una progressione globale deterministica;
-- semplifica la copertura sistematica della mappa.
+### Step B - Campionamento punti cella
 
-### 5.2 Campionamento stocastico intra-cella + test LOS
+`find_best_point_in_cell(...)`:
 
-Invece di puntare direttamente al centro cella, l'algoritmo:
+1. campiona ~100 punti casuali interni alla cella target.
+2. per ciascun punto esegue `check_line_of_sight(...)`.
+3. divide in:
+   - `valid_samples`
+   - `rejected_samples`
+4. sceglie il valid piu vicino al centro cella.
 
-- genera molti campioni random interni;
-- esegue test di line-of-sight su ciascun campione;
-- sceglie il migliore tra i validi (min distanza dal centro).
+Se `valid_samples` e' vuoto:
 
-Questo riduce fallimenti in presenza di ostacoli parziali dentro la cella o vicino ai bordi.
+- esito `LOS_BLOCKED`
+- la cella viene gestita come tentativo fallito.
 
-### 5.3 Validazione geometrica con signed distance map
+### Step C - Filtro locale anti-urto
 
-`obstacle_distance` fornisce una distanza signed dall'ostacolo:
+Prima del movimento il target viene filtrato con osservazioni locali:
 
-- `< 0`: dentro ostacolo,
-- `>= 0`: area attraversabile.
+- `self._is_local_obstacle_near(target_x, target_y)` controlla:
+  - nuvola locale da scan recente,
+  - opzionale camera local grid recente.
 
-Nel controllo LOS viene usata una soglia (`obstacle_threshold`) per avere un margine conservativo durante la scelta dei punti.
+Se target locale occupato:
 
-### 5.4 Strategia ibrida locale + topologica
+1. prova un altro punto tra i `valid_samples` che sia localmente safe,
+2. se non esiste -> `LOCAL_OBS_BLOCKED`.
 
-La navigazione non e' solo reattiva locale:
+### Step D - Visualizzazione RViz
 
-- locale: entrata in cella tramite local grid;
-- topologica: spostamenti lunghi tramite waypoint GraphNav.
+`visualize_grid_with_candidates_ros(...)` pubblica MarkerArray con:
 
-Questa combinazione aumenta robustezza in scenari ampi o con corridoi/ostacoli complessi.
-
-### 5.5 Recovery operativo
-
-Sono presenti meccanismi di recupero:
-
-- in `navigate_to_waypoint`, se `STATUS_LOST`, viene tentata `force_localization_to_waypoint`;
-- fallback e logging nei casi di `STUCK`/errori navigazione;
-- ottimizzazione anchoring finale per consistenza metrica del grafo.
-
----
-
-## 6) Sezione dettagliata Spot SDK (focus richiesto)
-
-## 6.1 Client e servizi usati
-
-### Accesso robot
-
-In `spotLogInUtils.setLogInfo`:
-
-- creazione SDK (`create_standard_sdk`),
-- creazione robot handle (`sdk.create_robot`),
-- autenticazione,
-- time sync,
-- lease client,
-- robot state client,
-- metadata client recording.
-
-### Controllo sicurezza
-
-`SimpleEstop` usa:
-
-- `EstopClient`, `EstopEndpoint`, `EstopKeepAlive`.
-
-### Motion command
-
-In `movements.relative_move`:
-
-- `RobotCommandBuilder.synchro_se2_trajectory_point_command`,
-- feedback continuo da `robot_command_feedback`.
-
-### Local Grid
-
-In `easy_walk` + `spotGrid`:
-
-- `LocalGridClient.get_local_grids(['obstacle_distance'])`,
-- parsing/decodifica griglia (raw o RLE),
-- trasformazione nel frame `VISION`.
-
-### GraphNav / Recording
-
-In `navGraphUtils.RecordingInterface`:
-
-- `GraphNavClient`,
-- `GraphNavRecordingServiceClient`,
-- `MapProcessingServiceClient`.
-
-Operazioni principali:
-
-- `start_recording`, `stop_recording`, `clear_map`;
-- `create_waypoint` (manual waypoint `wp_N`);
-- `navigate_to` e feedback;
-- `set_localization` (fiducial o waypoint);
-- `process_topology` (loop closure);
-- `process_anchoring` (ottimizzazione globale);
-- download graph/waypoint snapshots/edge snapshots.
-
-## 6.2 Localizzazione e frame nel dettaglio
-
-Il codice usa in modo esplicito:
-
-- `get_a_tform_b(snapshot, VISION, BODY)` per posa robot in world operativo;
-- `get_odom_tform_body(...)` come input in alcuni step GraphNav (`set_localization`).
-
-Impatto pratico:
-
-- decisioni di esplorazione e geometria cella sono in `VISION`;
-- GraphNav mantiene internamente la coerenza topologica/odometrica e viene aggiornato via record + anchoring.
-
-## 6.3 Registrazione waypoints manuali con metadati cella
-
-Ogni waypoint creato (`create_default_waypoint`) salva:
-
-- nome (`wp_N`),
-- ID waypoint GraphNav,
-- posa (`x,y,z,yaw`),
-- indice cella (`cell_row`, `cell_col`) se noto.
-
-Questo abilita il bridging tra:
-
-- livello continuo metrico (pose reali) e
-- livello discreto griglia (celle).
-
-## 6.4 Navigazione GraphNav con gestione errori
-
-`navigate_to_waypoint` implementa un loop comando/feedback:
-
-- successo: `STATUS_REACHED_GOAL`;
-- perdita localizzazione: `STATUS_LOST` -> recovery forzando localizzazione sul waypoint target;
-- blocco: `STATUS_STUCK` -> fail esplicito.
-
-`navigate_to_first_waypoint` applica logica analoga per il rientro a base.
-
-## 6.5 Download e persistenza mappa
-
-`download_full_graph` salva su cartella timestamp:
-
-- file `graph`,
-- `waypoint_snapshots/`,
-- `edge_snapshots/`.
-
-Questo permette post-analisi offline e riuso delle mappe prodotte.
-
----
-
-## 7) Visualizzazione e tracciamento missione
-
-In `easy_walk.visualize_grid_with_candidates`:
-
-- overlay local grid + griglia globale,
-- campioni validi/scartati,
+- occupancy locale (occupied/padding/free/unknown),
+- celle visitate/bloccate,
+- campioni valid/rejected,
 - target scelto,
-- waypoint registrati,
-- traccia percorso robot (`explore` vs `navigate`),
-- salvataggio immagini per iterazione.
+- distanza robot-target,
+- waypoint e path.
 
-E' presente anche una vista globale accumulata delle scansioni locali nel tempo.
+### Step E - Movimento sicuro a step
 
----
+`_safe_move_to_target(target_x, target_y, grid_helper)`:
 
-## 8) Pseudocodice sintetico del ciclo
+1. avanza a piccoli step (`avoid_step_size`), non in un unico salto.
+2. ogni step verifica corridoio con `_is_corridor_clear(...)`.
+3. `_is_segment_clear(...)` blocca se:
+   - mappa globale oltre soglia (`avoid_occupied_threshold` o `avoid_partial_threshold`),
+   - ostacolo vicino da osservazione locale.
 
-```text
-init robot/services
-start recording
-(optional) fiducial localization
-create wp_0
-init EnvironmentMap + origin + serpentine path
-frontier <- neighbors(start)
+Se il corridoio e' libero:
 
-while frontier not empty:
-    if esistono frontier adiacenti alla cella robot:
-        target <- adiacente con rank min
-        success <- attempt_enter_cell(target)
-    else:
-        target <- frontier globale con rank min
-        stop recording
-        navigate to nearest waypoint near target
-        start recording
-        success <- attempt_enter_cell(target)
+- invia movimento (`_move_to_world_target` -> `motion.move_to`).
 
-    if success:
-        create waypoint per target
-        mark target visited
-        aggiorna frontier con nuovi adiacenti
-    else:
-        rimuovi target da frontier
+Se bloccato:
 
-close loops + optimize anchoring
-navigate_to wp_0
-sit + power off
-download graph
-```
+- tenta sidestep sinistra/destra (`avoid_lateral_offset`),
+- riprova fino a `avoid_max_retries`.
+
+Errori tipici possibili:
+
+- `AVOIDANCE_BLOCKED`
+- `AVOIDANCE_STALLED`
+- `AVOIDANCE_MAX_STEPS`
+- `TF_UNAVAILABLE`
+- `MOVE_NO_PROGRESS`
+
+### Step F - Verifica finale cella
+
+Dopo movimento:
+
+1. legge posa finale,
+2. `env.is_point_in_cell(...)` verifica appartenenza alla cella target.
+
+Se dentro -> `OK`.
+Se fuori -> `CELL_MISMATCH`.
 
 ---
 
-## 9) Punti di attenzione tecnici
+## 5) Cosa succede dopo ogni tentativo
 
-- In `movements.relative_move` il valore di ritorno e' una tupla `(success, distance_traveled)`; in alcuni punti di `easy_walk.py` e' usato come se fosse un booleano puro. Conviene gestire esplicitamente il primo elemento della tupla.
-- La scelta del target waypoint per celle lontane e' Manhattan-based sulla griglia; in ambienti molto irregolari puo' non coincidere con la geodetica reale nel grafo.
-- Le soglie di classificazione ostacoli (`obstacle_threshold`) influenzano direttamente aggressivita'/sicurezza del planner locale.
+## Caso successo
+
+Se `attempt_enter_cell(...)` ritorna `OK`:
+
+1. `env.mark_cell_visited(row,col)`.
+2. crea waypoint (stub recording in ROS mode).
+3. aggiunge waypoint/posizione a `env`.
+4. aggiorna frontier con nuove celle adiacenti.
+5. rimuove la cella appena tentata dalla frontier.
+
+Effetto: il robot espande la regione esplorata in modo locale.
+
+## Caso fallimento
+
+Se il tentativo fallisce:
+
+1. cella rimossa dalla frontier corrente,
+2. `_handle_failed_attempt(...)` decide:
+   - errore transiente -> reinserisce la cella per retry (entro limite),
+   - errore permanente -> `env.mark_cell_blocked(row,col)`.
+3. per certi errori prova retreat verso waypoint precedente.
+
+Effetto: evita di bloccarsi in loop ciechi sulla stessa cella.
 
 ---
 
-## 10) In sintesi
+## 6) Esempio narrativo breve di una run
 
-L'algoritmo implementa una pipeline robusta e pragmatica:
+Immagina questa sequenza reale:
 
-1. copertura sistematica a celle (serpentina + frontier),
-2. validazione locale geometrica con local grid,
-3. supporto topologico GraphNav per riallineamenti/spostamenti lunghi,
-4. chiusura e consolidamento mappa con loop closure + anchoring.
+1. Entra in `(0,1)` con successo.
+2. Aggiorna frontier con `(0,2)`, `(1,1)`.
+3. Prova `(0,2)`: LOS valida, ma scan locale vede ostacolo improvviso -> cambia target interno cella.
+4. Muove a step, al terzo step corridoio bloccato -> sidestep LEFT riuscito.
+5. Completa ingresso cella -> mark visited.
+6. Prova `(1,2)`: tutti i campioni valid risultano localmente occupati -> `LOCAL_OBS_BLOCKED`.
+7. Retry una volta (errore transiente), secondo tentativo ancora fallito -> cella marcata bloccata.
+8. Continua su altra frontiera disponibile a rank min.
+9. Quando frontier diventa vuota -> rientra al punto iniziale con `_return_to_start_via_robot_path`.
 
-La parte SDK di Spot e' integrata in modo esteso: controllo robot, sensing locale, registrazione mappe, localizzazione, navigazione e persistenza finale del grafo.
+---
 
+## 7) Perche' ora e' piu fedele alla logica local-grid
+
+Rispetto a una strategia solo map-based:
+
+- non si fida solo della `/map` globale,
+- usa un layer locale recente (scan e opzionale camera local grid),
+- blocca anche celle parzialmente occupate (`avoid_partial_threshold`),
+- ricampiona target nella stessa cella se il primo punto e' localmente a rischio,
+- usa sidestep reattivo quando il corridoio si chiude.
+
+Questa e' la parte che replica meglio il comportamento "local perception first" del flusso SDK.
+
+---
+
+## 8) Parametri che influenzano di piu il comportamento
+
+Se vuoi fare tuning, questi sono i piu impattanti:
+
+- `avoid_occupied_threshold` / `avoid_partial_threshold`
+- `avoid_step_size`
+- `avoid_corridor_half_width`
+- `avoid_lateral_offset`
+- `avoid_max_retries`
+- `local_obs_timeout`
+- `local_obs_hit_radius`
+- `camera_local_grid_occupied_threshold`
+
+Regola pratica:
+
+- soglie piu basse + raggio hit piu alto => comportamento piu prudente,
+- step grandi + soglie alte => comportamento piu aggressivo (rischio urti maggiore).
+
+---
+
+## 9) Stato finale missione
+
+La missione e' considerata conclusa quando:
+
+1. non ci sono piu celle in `frontier`,
+2. il robot esegue ritorno su path registrato,
+3. viene loggato `Exploration complete.`
+
+A quel punto la run e' completa: celle visitate/bloccate aggiornate, traccia percorso e visualizzazione RViz disponibili.
