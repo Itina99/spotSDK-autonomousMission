@@ -273,21 +273,7 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
     y = pts[:, 1]
     PADDING_THRESHOLD = 0.15
     colors_norm = np.zeros((len(cells_obstacle_dist), 3), dtype=np.float32)
-    obstacle_mask = cells_obstacle_dist < 0.0def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, robot_y,
-                                   candidates, chosen_point, iteration, env=None, save_path=None):
-    """
-    Visualize the obstacle-distance grid with sampled candidates and chosen point.
-    Color scheme from obstacle_distance:
-      - red:   dist < 0.0 (inside obstacle)
-      - green: 0.0 <= dist < 0.33 (padding region)
-      - blue:  dist >= 0.33 (free/passable)
-    Optionally overlay global grid map (only cells visible within local grid bounds).
-
-    Args:
-        save_path: If provided, save the figure to this path
-    """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+    obstacle_mask = cells_obstacle_dist < 0.0
 
     fig, ax = plt.subplots(figsize=(14, 12))
 
@@ -848,6 +834,7 @@ def easy_walk(options):
     original_stderr = sys.stderr
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
+        ###### Setting up clients, powering on, and standing up ######
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         local_grid_client = robot.ensure_client(LocalGridClient.default_service_name)
         robot.time_sync.wait_for_sync()
@@ -870,6 +857,7 @@ def easy_walk(options):
             print("[INFO] The map origin will be set when creating the first waypoint.")
 
         # Grid start cell used consistently for origin, wp_0 and serpentine ranking.
+        ########## Setup for algo to start #######
         start_row, start_col = 0, 0
 
         # Create first waypoint in initial cell (wp_0)
@@ -887,7 +875,7 @@ def easy_walk(options):
         print(
             f'[INIT] Boot orientation: reale {np.rad2deg(yaw_boot):.1f}° -> allineata alla griglia: {np.rad2deg(yaw_boot):.1f}°')
 
-
+        ###### ROBA RELATIVA A SALVATAGGI VARI  ########
         mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
         base_graph_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph")
         os.makedirs(base_graph_folder, exist_ok=True)
@@ -912,6 +900,7 @@ def easy_walk(options):
 
         # Update recording interface to save graph in mission folder
         recordingInterface.set_download_filepath(graph_folder)
+        ##########################################################
 
         # Generate serpentine path starting from the configured start cell.
         path = env.generate_serpentine_path(start_cell=env.start_cell)

@@ -35,6 +35,7 @@ class RecordingInterface:
         self._download_filepath = filepath
 
     def create_default_waypoint(self, cell_row=None, cell_col=None, x=0.0, y=0.0, z=0.0, yaw=0.0):
+        ##### info sul robot sono passate come parametri ####
         name = f"wp_{len(self.waypoints)}"
         wp = Waypoint(name=name, x=x, y=y, z=z, yaw=yaw, cell_row=cell_row, cell_col=cell_col)
         self.waypoints.append(wp)

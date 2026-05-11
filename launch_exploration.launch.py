@@ -15,64 +15,138 @@ def generate_launch_description():
     wait_for_map_script = os.path.join(workspace_dir, 'wait_for_map.py')
     rviz_config_file = os.path.join(workspace_dir, 'RvizConfig', 'spotConfig.rviz')
 
-    # Bridge side fisheye cameras from Gazebo topics to ROS topics.
-    side_camera_bridge = ExecuteProcess(
+    # =========================
+    # 🎥 CAMERA + DEPTH BRIDGE
+    # =========================
+    camera_bridge = ExecuteProcess(
         cmd=[
             'ros2', 'run', 'ros_gz_bridge', 'parameter_bridge',
+
+            # RGB
+            '/model/spot/camera/frontleft_fisheye_image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/frontright_fisheye_image@sensor_msgs/msg/Image@gz.msgs.Image',
             '/model/spot/camera/left_fisheye_image@sensor_msgs/msg/Image@gz.msgs.Image',
-            '/model/spot/camera/left_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
             '/model/spot/camera/right_fisheye_image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/back_fisheye_image@sensor_msgs/msg/Image@gz.msgs.Image',
+
+            # RGB CAMERA INFO
+            '/model/spot/camera/frontleft_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/frontright_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/left_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
             '/model/spot/camera/right_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/back_fisheye_image/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+
+            # DEPTH
+            '/model/spot/camera/frontleft_depth@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/frontright_depth@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/left_depth@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/right_depth@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/camera/back_depth@sensor_msgs/msg/Image@gz.msgs.Image',
+
+            # DEPTH CAMERA INFO
+            '/model/spot/camera/frontleft_depth/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/frontright_depth/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/left_depth/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/right_depth/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/model/spot/camera/back_depth/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+
+            # THERMAL
+            '/model/spot/thermal_camera@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/model/spot/thermal_camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+
             '--ros-args',
-            '-r', '/model/spot/camera/left_fisheye_image:=/spot/camera/left_fisheye/image_raw',
-            '-r', '/model/spot/camera/left_fisheye_image/camera_info:=/spot/camera/left_fisheye/camera_info',
-            '-r', '/model/spot/camera/right_fisheye_image:=/spot/camera/right_fisheye/image_raw',
-            '-r', '/model/spot/camera/right_fisheye_image/camera_info:=/spot/camera/right_fisheye/camera_info',
+
+            # REMAP RGB
+            '-r', '/model/spot/camera/frontleft_fisheye_image:=/spot/camera/frontleft/image_raw',
+            '-r', '/model/spot/camera/frontright_fisheye_image:=/spot/camera/frontright/image_raw',
+            '-r', '/model/spot/camera/left_fisheye_image:=/spot/camera/left/image_raw',
+            '-r', '/model/spot/camera/right_fisheye_image:=/spot/camera/right/image_raw',
+            '-r', '/model/spot/camera/back_fisheye_image:=/spot/camera/back/image_raw',
+
+            # REMAP RGB CAMERA INFO
+            '-r', '/model/spot/camera/frontleft_fisheye_image/camera_info:=/spot/camera/frontleft/camera_info',
+            '-r', '/model/spot/camera/frontright_fisheye_image/camera_info:=/spot/camera/frontright/camera_info',
+            '-r', '/model/spot/camera/left_fisheye_image/camera_info:=/spot/camera/left/camera_info',
+            '-r', '/model/spot/camera/right_fisheye_image/camera_info:=/spot/camera/right/camera_info',
+            '-r', '/model/spot/camera/back_fisheye_image/camera_info:=/spot/camera/back/camera_info',
+
+            # REMAP DEPTH
+            '-r', '/model/spot/camera/frontleft_depth:=/spot/camera/frontleft/depth',
+            '-r', '/model/spot/camera/frontright_depth:=/spot/camera/frontright/depth',
+            '-r', '/model/spot/camera/left_depth:=/spot/camera/left/depth',
+            '-r', '/model/spot/camera/right_depth:=/spot/camera/right/depth',
+            '-r', '/model/spot/camera/back_depth:=/spot/camera/back/depth',
+
+            # REMAP DEPTH CAMERA INFO
+            '-r', '/model/spot/camera/frontleft_depth/camera_info:=/spot/camera/frontleft/depth/camera_info',
+            '-r', '/model/spot/camera/frontright_depth/camera_info:=/spot/camera/frontright/depth/camera_info',
+            '-r', '/model/spot/camera/left_depth/camera_info:=/spot/camera/left/depth/camera_info',
+            '-r', '/model/spot/camera/right_depth/camera_info:=/spot/camera/right/depth/camera_info',
+            '-r', '/model/spot/camera/back_depth/camera_info:=/spot/camera/back/depth/camera_info',
+
+            # REMAP THERMAL
+            '-r', '/model/spot/thermal_camera:=/spot/camera/thermal/image_raw',
+            '-r', '/model/spot/thermal_camera/camera_info:=/spot/camera/thermal/camera_info',
         ],
         output='screen'
     )
 
     # =========================
-    # 🔵 TF STATICI (FIX + DELAY)
+    # 📡 LIDAR BRIDGE
     # =========================
-
-    tf_camera_frontleft = TimerAction(
-        period=2.0,
-        actions=[Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='tf_camera_frontleft',
-            arguments=['0','0','0','0','0','0',
-                       'camera_frontleft',
-                       'spot/camera_frontleft/frontleft_fisheye_image']
-        )]
+    lidar_bridge = ExecuteProcess(
+        cmd=[
+            'ros2', 'run', 'ros_gz_bridge', 'parameter_bridge',
+            '/model/spot/lidar@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked',
+            '--ros-args',
+            '-r', '/model/spot/lidar:=/spot/lidar/points'
+        ],
+        output='screen'
     )
 
-    tf_camera_frontright = TimerAction(
-        period=2.0,
-        actions=[Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='tf_camera_frontright',
-            arguments=['0','0','0','0','0','0',
-                       'camera_frontright',
-                       'spot/camera_frontright/frontright_fisheye_image']
-        )]
+    # =========================
+    # 🔄 POINTCLOUD → LASERSCAN
+    # =========================
+    pointcloud_to_scan = Node(
+        package='pointcloud_to_laserscan',
+        executable='pointcloud_to_laserscan_node',
+        name='pointcloud_to_scan',
+        parameters=[{
+            'use_sim_time': True,
+            'target_frame': 'base_link',
+            'transform_tolerance': 0.01,
+            'min_height': -0.2,
+            'max_height': 0.2,
+            'angle_min': -3.14,
+            'angle_max': 3.14,
+            'angle_increment': 0.0087,
+            'scan_time': 0.1,
+            'range_min': 0.1,
+            'range_max': 10.0
+        }],
+        remappings=[
+            ('cloud_in', '/spot/lidar/points'),
+            ('scan', '/spot/lidar/scan')
+        ],
+        output='screen'
     )
 
-    tf_camera_back = TimerAction(
-        period=2.0,
-        actions=[Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='tf_camera_back',
-            arguments=['0','0','0','0','0','0',
-                       'camera_back',
-                       'spot/camera_back/back_fisheye_image']
-        )]
+    # =========================
+    # 🧭 IMU BRIDGE
+    # =========================
+    imu_bridge = ExecuteProcess(
+        cmd=[
+            'ros2', 'run', 'ros_gz_bridge', 'parameter_bridge',
+            '/model/spot/imu@sensor_msgs/msg/Imu@gz.msgs.IMU',
+            '--ros-args',
+            '-r', '/model/spot/imu:=/spot/imu'
+        ],
+        output='screen'
     )
 
-    # 🔵 LIDAR (usa solo se necessario)
+    # =========================
+    # 🔵 TF STATICI
+    # =========================
     tf_lidar = TimerAction(
         period=2.0,
         actions=[Node(
@@ -80,7 +154,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='tf_lidar',
             arguments=['0','0','0','0','0','0',
-                       'lidar_link',
+                       'base_link',
                        'spot/lidar']
         )]
     )
@@ -88,7 +162,6 @@ def generate_launch_description():
     # =========================
     # 🔵 SLAM TOOLBOX
     # =========================
-
     slam_toolbox_node = Node(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
@@ -101,15 +174,13 @@ def generate_launch_description():
             'base_frame': 'base_link'
         }],
         remappings=[
-            ('scan', '/spot/lidar/scan'),
-            ('/scan', '/spot/lidar/scan')
+            ('scan', '/spot/lidar/scan')
         ]
     )
 
     # =========================
     # 🔵 ODOM → TF
     # =========================
-
     odom_to_tf_node = ExecuteProcess(
         cmd=[
             'python3', odom_to_tf_script,
@@ -123,7 +194,6 @@ def generate_launch_description():
     # =========================
     # 🔵 RVIZ
     # =========================
-
     rviz2_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -136,7 +206,6 @@ def generate_launch_description():
     # =========================
     # 🔵 WAIT FOR MAP
     # =========================
-
     wait_for_map_process = ExecuteProcess(
         cmd=[
             'python3', wait_for_map_script,
@@ -152,7 +221,6 @@ def generate_launch_description():
     # =========================
     # 🔵 EVENT FLOW
     # =========================
-
     start_slam_after_odom = RegisterEventHandler(
         OnProcessStart(
             target_action=odom_to_tf_node,
@@ -175,21 +243,17 @@ def generate_launch_description():
     )
 
     # =========================
-    # 🚀 LAUNCH COMPLETO
+    # 🚀 LAUNCH
     # =========================
-
     return LaunchDescription([
 
-        # side camera bridge
-        side_camera_bridge,
+        camera_bridge,
+        lidar_bridge,
+        imu_bridge,
+        pointcloud_to_scan,
 
-        # TF FIX (ritardati per evitare race condition)
-        tf_camera_frontleft,
-        tf_camera_frontright,
-        tf_camera_back,
         tf_lidar,
 
-        # pipeline principale
         odom_to_tf_node,
         start_slam_after_odom,
         start_wait_for_map_after_slam,

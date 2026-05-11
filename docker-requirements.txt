@@ -6,6 +6,7 @@ charset-normalizer
 Deprecated>=1.2.10
 grpcio>=1.42.0
 idna>=2.10
+matplotlib>=3.5.0
 numpy>=1.19.5
 Pillow>=9.4.0
 protobuf>=3.19.4

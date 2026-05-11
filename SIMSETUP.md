@@ -17,7 +17,7 @@ In un terminale **senza Conda attivo**, installa i pacchetti necessari:
 
 ```bash
 sudo apt update
-sudo apt install python3-opencv ros-humble-cv-bridge ros-humble-vision-msgs ros-humble-ros-gz
+sudo apt install python3-opencv ros-humble-cv-bridge ros-humble-vision-msgs ros-humble-ros-gz ros-humble-pointcloud-to-laserscan
 ```
 
 ---
@@ -120,53 +120,8 @@ Lo script esegue una sequenza preimpostata:
 Per lanciare l'algoritmo completo di mappatura e navigazione servono 4 terminali.
 In **ogni** terminale ricordati di disattivare Conda e fare il source:
 
-```bash
-conda deactivate
-source /opt/ros/humble/setup.bash
-source /data/itina99/spot_sim_ws/install/setup.bash
-```
 
-### Terminale 1: Lancio di Gazebo
-Avvia la simulazione con il mondo desiderato:
-
-```bash
-ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
-```
-
-### Terminale 2: Ponte Odometria - TF
-Collega l'odometria di Gazebo all'albero delle trasformazioni (necessario per lo SLAM):
-
-```bash
-cd /data/itina99/Progetti/spotSDK-autonomousMission
-python3 odom_to_tf.py --ros-args -p use_sim_time:=true
-```
-
-### Terminale 3: SLAM Toolbox
-Genera la mappa 2D (OccupancyGrid) processando in tempo reale i dati del Lidar:
-
-```bash
-ros2 run slam_toolbox async_slam_toolbox_node --ros-args -p use_sim_time:=true -r scan:=/spot/lidar/scan -p odom_frame:=odom_spot -p base_frame:=base_link
-```
-*(Attendi che compaia "Registering sensor: [Custom Described Lidar]")*
-
-### Terminale 4: Algoritmo di Esplorazione
-*(Opzionale: muovi prima leggermente il robot da un altro terminale o sblocca la visione per creare i primi metri liberi sulla mappa, altrimenti l'algoritmo potrebbe identificare le celle adiacenti come muri non esplorati)*
-Lancia la vera e propria missione autonoma:
-
-```bash
-cd /data/itina99/Progetti/spotSDK-autonomousMission
-python3 -m spot_ros.easy_walk_ros --ros-args -p odom_topic:=/spot/odometry -p use_sim_time:=true
-```
-
-### Alternativa: launch unico per TF + SLAM + RViz
-Se preferisci evitare l'avvio manuale di TF bridge, SLAM e RViz in terminali separati, puoi usare il launch file del progetto.
-
-Questa alternativa mantiene la stessa logica ma con sequenza automatica:
-1. `odom_to_tf.py`
-2. `slam_toolbox`
-3. `rviz2` (solo dopo la prima mappa su `/map`)
-
-In ogni terminale, prima fai comunque:
+In ogni terminale, prima fai:
 
 ```bash
 conda deactivate
@@ -198,3 +153,81 @@ Se resta in attesa troppo a lungo:
 - verifica che SLAM Toolbox sia partito correttamente
 - muovi Spot per qualche secondo per generare le prime celle di mappa
 
+---
+
+## 8. Nuovo Metodo: LocalGridService + Static Grid (Consigliato)
+
+A partire dalla versione aggiornata, il sistema supporta un **LocalGridService** che pubblica una vista **locale ±2m** del mondo a partire dalla griglia statica del SDF. Questo offre:
+
+- ✅ **Zero latenza**: griglia precomputata dal SDF
+- ✅ **Visione locale realistica**: robot non vede oltre ±2m
+- ✅ **Deterministica**: sempre lo stesso risultato
+- ✅ **CPU-efficient**: estrae solo il ±2m rilevante
+
+### Come lanciare con LocalGridService
+
+#### Terminale A: Gazebo
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
+```
+
+#### Terminale B: LocalGridService (NUOVO ✨)
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+python3 -m spot_ros.local_grid_service
+```
+
+Questo nodo:
+- Carica il SDF una sola volta
+- Sottoscritto a `/odom` (posizione robot)
+- Pubblica `/spot/local_grid` a 10 Hz (OccupancyGrid 30×30, ±2m)
+
+#### Terminale C: Launch orchestrato (TF bridge + SLAM + RViz)
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+ros2 launch launch_exploration.launch.py
+```
+
+#### Terminale D: Algoritmo di Esplorazione (con Local Grid)
+```bash
+conda deactivate
+source /opt/ros/humble/setup.bash
+source /data/itina99/spot_sim_ws/install/setup.bash
+cd /data/itina99/Progetti/spotSDK-autonomousMission
+python3 -m spot_ros.easy_walk_ros --ros-args -p odom_topic:=/spot/odometry -p use_sim_time:=true
+```
+
+Il sistema automaticamente:
+1. Sottoscritto a `/spot/local_grid` (se disponibile)
+2. Usa la vista locale per checkare line-of-sight
+3. Fallback al sistema precedente se il service non è attivo
+
+### Confronto: Metodi di Pubblicazione Map
+
+| Aspetto | Metodo Vecchio | LocalGridService |
+|---------|---|---|
+| **Fonte mappa** | SLAM real-time da sensori | SDF statico precomputato |
+| **Latenza** | Variabile (sensori) | Zero (cache) |
+| **FoV Robot** | Illimitato | ±2m (realistico) |
+| **Terminali** | 3 (Gazebo + Launch + Algorithm) | 4 (+ LocalGridService) |
+| **CPU** | Alto (SLAM) | Basso (lookup grid) |
+| **Quando usare** | Testing rapido | Simulazione più realistica |
+
+### Parametri LocalGridService
+
+Se vuoi customizzare il service, modifica `local_grid_service.py`:
+
+```python
+self.local_range = 2.0           # Raggio visione ±X metri
+self.local_grid_size = 30        # Celle della griglia locale (30×30)
+sdf_path = "/path/to/test.sdf"   # Path SDF file
+```

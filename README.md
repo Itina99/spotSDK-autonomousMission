@@ -130,6 +130,20 @@ pip install numpy matplotlib
 python easy_walk.py --username USER --password PASS ROBOT_IP
 ```
 
+### Static Grid Tool (SDF)
+
+Generate a static occupancy grid from the test SDF and visualize it:
+
+```bash
+python tools/sdf_static_grid.py --plot
+```
+
+Save the visualization to an image (useful for headless environments):
+
+```bash
+python tools/sdf_static_grid.py --save-image /tmp/occupancy_grid.png
+```
+
 ### Configuration Parameters
 
 The system can be configured by modifying the `EnvironmentMap` initialization in `easy_walk.py`:
@@ -326,4 +340,3 @@ Developed as part of autonomous robotics research at Università degli Studi di 
   - Edge-based waypoint visualization
   - Mission-specific output folders
   - Real-time monitoring with persistent saving
-
