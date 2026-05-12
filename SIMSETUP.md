@@ -183,6 +183,8 @@ cd /data/itina99/Progetti/spotSDK-autonomousMission
 python3 -m spot_ros.local_grid_service
 ```
 
+
+
 Questo nodo:
 - Carica il SDF una sola volta
 - Sottoscritto a `/odom` (posizione robot)
@@ -205,6 +207,15 @@ source /data/itina99/spot_sim_ws/install/setup.bash
 cd /data/itina99/Progetti/spotSDK-autonomousMission
 python3 -m spot_ros.easy_walk_ros --ros-args -p odom_topic:=/spot/odometry -p use_sim_time:=true
 ```
+
+#### Comandi per GPU
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch spot_bringup spot.gazebo.launch.py world_file:=/data/itina99/spot_sim_ws/worlds/test.sdf
+```
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch launch_exploration.launch.py
+```
+
 
 Il sistema automaticamente:
 1. Sottoscritto a `/spot/local_grid` (se disponibile)

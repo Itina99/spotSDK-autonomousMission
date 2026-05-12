@@ -218,7 +218,6 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
     frame_id = node.map_frame if node.map_frame else 'map'
     stamp = node.get_clock().now().to_msg()
     marker_array = MarkerArray()
-    marker_id = 0
 
     def rgba(r, g, b, a=1.0):
         return ColorRGBA(r=float(r), g=float(g), b=float(b), a=float(a))
@@ -230,14 +229,12 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
         p.z = float(z)
         return p
 
-    def add_marker(ns, mtype, color, sx, sy, sz, action=Marker.ADD):
-        nonlocal marker_id
+    def add_marker_fixed(ns, mid, mtype, color, sx, sy, sz, action=Marker.ADD):
         m = Marker()
         m.header.frame_id = frame_id
         m.header.stamp = stamp
         m.ns = ns
-        m.id = marker_id
-        marker_id += 1
+        m.id = mid
         m.type = mtype
         m.action = action
         m.pose.orientation.w = 1.0
@@ -247,10 +244,6 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
         m.color = color
         marker_array.markers.append(m)
         return m
-
-    clear = add_marker('easy_walk_clear', Marker.SPHERE, rgba(0, 0, 0, 0), 0.01, 0.01, 0.01, action=Marker.DELETEALL)
-    clear.id = 0
-    marker_id = 1
 
     local_radius = float(getattr(node, 'viz_local_radius', 8.0))
     padding_threshold = 0.15
@@ -303,24 +296,30 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
                 free_points.append(p)
 
     if obstacle_points:
-        m = add_marker('grid_obstacle', Marker.POINTS, rgba(1.0, 0.0, 0.0, 0.85), grid_point_scale, grid_point_scale, 0.01)
+        m = add_marker_fixed('grid_obstacle', 10, Marker.POINTS, rgba(1.0, 0.0, 0.0, 0.85), grid_point_scale, grid_point_scale, 0.01)
         m.points = obstacle_points
+    else:
+        add_marker_fixed('grid_obstacle', 10, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), grid_point_scale, grid_point_scale, 0.01, action=Marker.DELETE)
     if padding_points:
-        m = add_marker('grid_padding', Marker.POINTS, rgba(0.0, 1.0, 0.0, 0.75), grid_point_scale, grid_point_scale, 0.01)
+        m = add_marker_fixed('grid_padding', 11, Marker.POINTS, rgba(0.0, 1.0, 0.0, 0.75), grid_point_scale, grid_point_scale, 0.01)
         m.points = padding_points
+    else:
+        add_marker_fixed('grid_padding', 11, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), grid_point_scale, grid_point_scale, 0.01, action=Marker.DELETE)
     if free_points:
-        m = add_marker('grid_free', Marker.POINTS, rgba(0.1, 0.3, 1.0, 0.65), grid_point_scale, grid_point_scale, 0.01)
+        m = add_marker_fixed('grid_free', 12, Marker.POINTS, rgba(0.1, 0.3, 1.0, 0.65), grid_point_scale, grid_point_scale, 0.01)
         m.points = free_points
+    else:
+        add_marker_fixed('grid_free', 12, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), grid_point_scale, grid_point_scale, 0.01, action=Marker.DELETE)
 
     if env is not None:
         cos_yaw = math.cos(env.origin_yaw)
         sin_yaw = math.sin(env.origin_yaw)
         half_size = env.cell_size / 2.0
 
-        visited_lines = add_marker('cells_visited', Marker.LINE_LIST, rgba(0.0, 0.5, 0.0, 0.85), 0.05, 0.0, 0.0)
-        blocked_lines = add_marker('cells_blocked', Marker.LINE_LIST, rgba(0.7, 0.0, 0.0, 0.85), 0.05, 0.0, 0.0)
-        unvisited_lines = add_marker('cells_unvisited', Marker.LINE_LIST, rgba(0.5, 0.5, 0.5, 0.55), 0.03, 0.0, 0.0)
-        explored_lines = add_marker('cells_explored_sides', Marker.LINE_LIST, rgba(1.0, 0.0, 0.0, 0.9), 0.05, 0.0, 0.0)
+        visited_lines = add_marker_fixed('cells_visited', 20, Marker.LINE_LIST, rgba(0.0, 0.5, 0.0, 0.85), 0.05, 0.0, 0.0)
+        blocked_lines = add_marker_fixed('cells_blocked', 21, Marker.LINE_LIST, rgba(0.7, 0.0, 0.0, 0.85), 0.05, 0.0, 0.0)
+        unvisited_lines = add_marker_fixed('cells_unvisited', 22, Marker.LINE_LIST, rgba(0.5, 0.5, 0.5, 0.55), 0.03, 0.0, 0.0)
+        explored_lines = add_marker_fixed('cells_explored_sides', 23, Marker.LINE_LIST, rgba(1.0, 0.0, 0.0, 0.9), 0.05, 0.0, 0.0)
 
         explored_segments = []
         for row in range(env.rows):
@@ -369,6 +368,11 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
             for (sx, sy), (ex, ey) in explored_segments:
                 explored_lines.points.append(pt(sx, sy, 0.05))
                 explored_lines.points.append(pt(ex, ey, 0.05))
+    else:
+        add_marker_fixed('local_cells_visited', 6, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_blocked', 7, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_unvisited', 8, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.03, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_explored_sides', 9, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
 
     rejected = []
     valid = []
@@ -377,12 +381,16 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
         valid = list(candidates.get('valid', []))
 
     if rejected:
-        m = add_marker('candidates_rejected', Marker.POINTS, rgba(1.0, 0.0, 0.0, 1.0), 0.14, 0.14, 0.01)
+        m = add_marker_fixed('candidates_rejected', 30, Marker.POINTS, rgba(1.0, 0.0, 0.0, 1.0), 0.14, 0.14, 0.01)
         m.points = [pt(px, py, 0.06) for px, py in rejected]
+    else:
+        add_marker_fixed('candidates_rejected', 30, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), 0.14, 0.14, 0.01, action=Marker.DELETE)
 
     if valid:
-        m = add_marker('candidates_valid', Marker.POINTS, rgba(1.0, 0.9, 0.0, 0.9), 0.12, 0.12, 0.01)
+        m = add_marker_fixed('candidates_valid', 31, Marker.POINTS, rgba(1.0, 0.9, 0.0, 0.9), 0.12, 0.12, 0.01)
         m.points = [pt(px, py, 0.06) for px, py in valid]
+    else:
+        add_marker_fixed('candidates_valid', 31, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), 0.12, 0.12, 0.01, action=Marker.DELETE)
 
     # **NEW**: Draw robot exploration path history
     global ROBOT_PATH_HISTORY
@@ -392,42 +400,61 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
 
     # Draw path as a line strip
     if len(ROBOT_PATH_HISTORY) > 1:
-        path_line = add_marker('robot_path', Marker.LINE_STRIP, rgba(0.2, 0.8, 0.2, 0.8), 0.04, 0.0, 0.0)
+        path_line = add_marker_fixed('robot_path', 40, Marker.LINE_STRIP, rgba(0.2, 0.8, 0.2, 0.8), 0.04, 0.0, 0.0)
         path_line.points = [pt(px, py, 0.03) for px, py in ROBOT_PATH_HISTORY[-50:]]  # Last 50 points to avoid huge marker
+    else:
+        add_marker_fixed('robot_path', 40, Marker.LINE_STRIP, rgba(0.0, 0.0, 0.0, 0.0), 0.04, 0.0, 0.0, action=Marker.DELETE)
 
-    robot_marker = add_marker('robot_pose', Marker.SPHERE, rgba(0.0, 0.1, 1.0, 0.95), 0.28, 0.28, 0.16)
+    robot_marker = add_marker_fixed('robot_pose', 41, Marker.SPHERE, rgba(0.0, 0.1, 1.0, 0.95), 0.28, 0.28, 0.16)
     robot_marker.pose.position = pt(robot_x, robot_y, 0.10)
 
     if chosen_point is not None:
         tx, ty = chosen_point
-        target = add_marker('chosen_target', Marker.SPHERE, rgba(0.0, 0.9, 0.0, 1.0), 0.30, 0.30, 0.20)
+        target = add_marker_fixed('chosen_target', 42, Marker.SPHERE, rgba(0.0, 0.9, 0.0, 1.0), 0.30, 0.30, 0.20)
         target.pose.position = pt(tx, ty, 0.10)
 
-        target_line = add_marker('target_segment', Marker.LINE_STRIP, rgba(0.0, 0.8, 0.0, 0.95), 0.05, 0.0, 0.0)
+        target_line = add_marker_fixed('target_segment', 43, Marker.LINE_STRIP, rgba(0.0, 0.8, 0.0, 0.95), 0.05, 0.0, 0.0)
         target_line.points = [pt(robot_x, robot_y, 0.05), pt(tx, ty, 0.05)]
 
         dist = math.hypot(tx - robot_x, ty - robot_y)
-        label = add_marker('target_distance', Marker.TEXT_VIEW_FACING, rgba(0.0, 0.4, 0.0, 1.0), 0.0, 0.0, 0.22)
+        label = add_marker_fixed('target_distance', 44, Marker.TEXT_VIEW_FACING, rgba(0.0, 0.4, 0.0, 1.0), 0.0, 0.0, 0.22)
         label.pose.position = pt((robot_x + tx) / 2.0, (robot_y + ty) / 2.0, 0.22)
         label.text = f"{dist:.2f}m"
+    else:
+        add_marker_fixed('chosen_target', 42, Marker.SPHERE, rgba(0.0, 0.0, 0.0, 0.0), 0.30, 0.30, 0.20, action=Marker.DELETE)
+        add_marker_fixed('target_segment', 43, Marker.LINE_STRIP, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('target_distance', 44, Marker.TEXT_VIEW_FACING, rgba(0.0, 0.0, 0.0, 0.0), 0.0, 0.0, 0.22, action=Marker.DELETE)
 
-    info = add_marker('iteration_info', Marker.TEXT_VIEW_FACING, rgba(0.1, 0.1, 0.1, 0.95), 0.0, 0.0, 0.24)
+    info = add_marker_fixed('iteration_info', 45, Marker.TEXT_VIEW_FACING, rgba(0.1, 0.1, 0.1, 0.95), 0.0, 0.0, 0.24)
     info.pose.position = pt(robot_x, robot_y + 0.45, 0.28)
     info.text = f"iter={iteration} valid={len(valid)} rejected={len(rejected)}"
 
     node.viz_pub.publish(marker_array)
 
 
-def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_point, iteration, env=None, slam_helper=None):
-    """Publish RViz markers using the static grid and optionally SLAM data (hybrid visualization).
 
-    Optimized for performance:
-    - FOV limited to 4 meters (adjacent cells only, since each cell is 2x2m)
-    - Continuous grid visualization using CUBE_LIST instead of sparse POINTS
-    - Timing profiling to identify bottlenecks
+# Persistent visualization limits
+MAX_PERSISTENT_POINTS = 50000
+PERSISTENT_UPDATE_RATE = 20
+PERSISTENT_DOWNSAMPLE = 2
+
+
+def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_point, iteration, env=None):
+    """Publish RViz markers using the static grid and optionally SLAM data.
+
+    Optimizations:
+    - Limited FOV rendering
+    - Persistent history rendered less frequently
+    - Downsampling for RViz performance
+    - Reduced marker rebuild overhead
     """
+
+    global GLOBAL_OBSERVED_OBSTACLES
+    global GLOBAL_OBSERVED_PADDING
+    global GLOBAL_OBSERVED_FREE
+    global ROBOT_PATH_HISTORY
+
     node = ROS_NODE
-    global GLOBAL_OBSERVED_OBSTACLES, GLOBAL_OBSERVED_PADDING, GLOBAL_OBSERVED_FREE, ROBOT_PATH_HISTORY
     if node is None or not getattr(node, 'viz_enabled', False):
         return
 
@@ -436,7 +463,6 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
     frame_id = 'map'
     stamp = node.get_clock().now().to_msg()
     marker_array = MarkerArray()
-    marker_id = 0
 
     def rgba(r, g, b, a=1.0):
         return ColorRGBA(r=float(r), g=float(g), b=float(b), a=float(a))
@@ -448,14 +474,12 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
         p.z = float(z)
         return p
 
-    def add_marker(ns, mtype, color, sx, sy, sz, action=Marker.ADD):
-        nonlocal marker_id
+    def add_marker_fixed(ns, mid, mtype, color, sx, sy, sz, action=Marker.ADD):
         m = Marker()
         m.header.frame_id = frame_id
         m.header.stamp = stamp
         m.ns = ns
-        m.id = marker_id
-        marker_id += 1
+        m.id = mid
         m.type = mtype
         m.action = action
         m.pose.orientation.w = 1.0
@@ -466,29 +490,31 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
         marker_array.markers.append(m)
         return m
 
-    # **IMPORTANT**: Only clear LOCAL (transitory) markers, not GLOBAL (persistent) ones
-    # By separating namespaces, RViz keeps persistent markers even when we DELETE_ALL local ones
+    # ------------------------------------------------------------------
+    # Global explored map
+    # ------------------------------------------------------------------
 
     prof_global_start = time.time()
 
-    # **LAYER 1: GLOBAL EXPLORED MAP** (semi-transparent background, all visited cells) - PERSISTENT
     if env is not None:
+
         cos_yaw = math.cos(env.origin_yaw)
         sin_yaw = math.sin(env.origin_yaw)
         half_size = env.cell_size / 2.0
 
-        # Global background cells (visited/blocked) - LOW OPACITY for context
-        # Using unique namespace 'persistent_*' so they never get deleted
-        global_visited_bg = add_marker(
+        global_visited_bg = add_marker_fixed(
             'persistent_global_visited',
+            0,
             Marker.LINE_LIST,
             rgba(0.0, 0.5, 0.0, 0.25),
             0.03,
             0.0,
             0.0
         )
-        global_blocked_bg = add_marker(
+
+        global_blocked_bg = add_marker_fixed(
             'persistent_global_blocked',
+            1,
             Marker.LINE_LIST,
             rgba(0.7, 0.0, 0.0, 0.25),
             0.03,
@@ -498,6 +524,7 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
 
         for row in range(env.rows):
             for col in range(env.cols):
+
                 center = env.get_world_position_from_cell(row, col)
                 if center is None:
                     continue
@@ -505,12 +532,12 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
                 cell_x, cell_y = center
 
                 status_raw = env.get_cell_status(row, col)
+
                 if isinstance(status_raw, tuple):
                     cell_status, _ = status_raw
                 else:
                     cell_status = status_raw
 
-                # Only draw visited/blocked globally (skip unvisited for clarity)
                 if cell_status == 0:
                     continue
 
@@ -522,12 +549,17 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
                 ]
 
                 corners = []
+
                 for gx, gy in corners_grid:
                     wx = cell_x + (gx * cos_yaw - gy * sin_yaw)
                     wy = cell_y + (gx * sin_yaw + gy * cos_yaw)
                     corners.append(pt(wx, wy, 0.00))
 
-                target_bg = global_visited_bg if cell_status == 1 else global_blocked_bg
+                target_bg = (
+                    global_visited_bg
+                    if cell_status == 1
+                    else global_blocked_bg
+                )
 
                 for i in range(4):
                     target_bg.points.append(corners[i])
@@ -535,139 +567,158 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
 
     prof_global_time = time.time() - prof_global_start
 
+    # ------------------------------------------------------------------
+    # Robot path history
+    # ------------------------------------------------------------------
 
     if len(ROBOT_PATH_HISTORY) > 1:
-        path_line = add_marker(
+
+        path_line = add_marker_fixed(
             'persistent_robot_path',
+            2,
             Marker.LINE_STRIP,
             rgba(0.2, 0.8, 0.2, 0.7),
             0.05,
             0.0,
             0.0
         )
-        path_line.points = [pt(px, py, 0.005) for px, py in ROBOT_PATH_HISTORY]
 
-    # **CRITICAL**: Clear only TRANSITORY markers (local FOV, candidates, etc)
-    # This DELETEALL only affects markers with namespace starting with 'local_'
-    clear = add_marker(
-        'local_transitory_clear',
-        Marker.SPHERE,
-        rgba(0, 0, 0, 0),
-        0.01,
-        0.01,
-        0.01,
-        action=Marker.DELETEALL
-    )
-    clear.id = 0
-    marker_id = 1
+        path_line.points = [
+            pt(px, py, 0.005)
+            for px, py in ROBOT_PATH_HISTORY
+        ]
+    else:
+        add_marker_fixed(
+            'persistent_robot_path',
+            2,
+            Marker.LINE_STRIP,
+            rgba(0.0, 0.0, 0.0, 0.0),
+            0.05,
+            0.0,
+            0.0,
+            action=Marker.DELETE
+        )
 
-    # **LAYER 2: LOCAL FOV GRID** (detailed obstacle/free view, 4 meters)
-    # **OPTIMIZED FOV**: 4 meters (robot's field of view is ~4x4m square)
-    # Since each cell is 2x2m, robot can see adjacent cells only
-    local_radius = 2.0  # Reduced from 8.0 to 4.0 (actual FOV is 4x4m)
+    # ------------------------------------------------------------------
+    # Clear local markers only (NOT the persistent path!)
+    # ------------------------------------------------------------------
+    # IMPORTANT: We DON'T use DELETEALL here because it would erase
+    # the persistent_robot_path. Instead, we'll overwrite local markers
+    # with new data by using consistent IDs within their namespace.
+
+    # ------------------------------------------------------------------
+    # Local FOV grid
+    # ------------------------------------------------------------------
+
+    local_radius = 2.0
     padding_threshold = 0.15
 
     prof_sdf_start = time.time()
 
-    # Draw static grid from SDF if available - CONTINUOUS visualization
     if (
         local_distance is not None and
         hasattr(local_distance, 'obstacle_grid') and
         local_distance.obstacle_grid is not None
     ):
+
         spec = local_distance.obstacle_grid.spec
 
-        obstacle_cubes = add_marker(
+        obstacle_cubes = add_marker_fixed(
             'local_grid_obstacle_sdf',
+            3,
             Marker.CUBE_LIST,
-            rgba(1.0, 0.0, 0.0, 0.7),
+            rgba(1.0, 0.0, 0.0, 0.35),
             spec.resolution,
             spec.resolution,
             0.01
         )
 
-        padding_cubes = add_marker(
+        padding_cubes = add_marker_fixed(
             'local_grid_padding_sdf',
+            4,
             Marker.CUBE_LIST,
-            rgba(1.0, 1.0, 0.0, 0.6),
+            rgba(1.0, 1.0, 0.0, 0.35),
             spec.resolution,
             spec.resolution,
             0.01
         )
 
-        free_cubes = add_marker(
+        free_cubes = add_marker_fixed(
             'local_grid_free_sdf',
+            5,
             Marker.CUBE_LIST,
-            rgba(0.2, 0.8, 0.2, 0.4),
+            rgba(0.2, 0.8, 0.2, 0.35),
             spec.resolution,
             spec.resolution,
             0.01
         )
+
+        # IMPORTANT: Clear points from previous frames before adding new ones
+        obstacle_cubes.points = []
+        padding_cubes.points = []
+        free_cubes.points = []
 
         for mx in range(spec.width):
             for my in range(spec.height):
+
                 wx, wy = spec.map_to_world(mx, my)
 
-                # **LIMITED FOV**: Only cells within 4 meters (2-cell radius)
-                if abs(wx - robot_x) > local_radius or abs(wy - robot_y) > local_radius:
+                if (
+                    abs(wx - robot_x) > local_radius or
+                    abs(wy - robot_y) > local_radius
+                ):
                     continue
 
-                dist = local_distance.obstacle_grid.signed_cells[my * spec.width + mx]
+                dist = local_distance.obstacle_grid.signed_cells[
+                    my * spec.width + mx
+                ]
+
                 p = pt(wx, wy, 0.01)
-                point_key = (round(wx, 2), round(wy, 2), round(dist, 3))
+                point_key = (
+                    round(wx, 2),
+                    round(wy, 2),
+                    round(dist, 3)
+                )
 
                 if dist < 0.0:
                     obstacle_cubes.points.append(p)
                     GLOBAL_OBSERVED_OBSTACLES.add(point_key)
 
+                    if len(GLOBAL_OBSERVED_OBSTACLES) > MAX_PERSISTENT_POINTS:
+                        GLOBAL_OBSERVED_OBSTACLES.pop()
+
                 elif dist < padding_threshold:
                     padding_cubes.points.append(p)
                     GLOBAL_OBSERVED_PADDING.add(point_key)
+
+                    if len(GLOBAL_OBSERVED_PADDING) > MAX_PERSISTENT_POINTS:
+                        GLOBAL_OBSERVED_PADDING.pop()
 
                 else:
                     free_cubes.points.append(p)
                     GLOBAL_OBSERVED_FREE.add(point_key)
 
-    # Fallback: Draw SLAM grid if static grid unavailable
-    elif (
-        slam_helper is not None and
-        hasattr(slam_helper, 'width') and
-        hasattr(slam_helper, 'height')
-    ):
-        slam_resolution = slam_helper.resolution
+                    if len(GLOBAL_OBSERVED_FREE) > MAX_PERSISTENT_POINTS:
+                        GLOBAL_OBSERVED_FREE.pop()
 
-        slam_cubes = add_marker(
-            'local_grid_slam',
-            Marker.CUBE_LIST,
-            rgba(0.5, 0.5, 0.8, 0.4),
-            slam_resolution,
-            slam_resolution,
-            0.01
-        )
-
-        for mx in range(slam_helper.width):
-            for my in range(slam_helper.height):
-                wx, wy = slam_helper.map_to_world(mx, my)
-
-                # **LIMITED FOV**: Only cells within 4 meters
-                if abs(wx - robot_x) > local_radius or abs(wy - robot_y) > local_radius:
-                    continue
-
-                p = pt(wx, wy, 0.01)
-                slam_cubes.points.append(p)
 
     prof_sdf_time = time.time() - prof_sdf_start
 
+    # ------------------------------------------------------------------
+    # Environment cells
+    # ------------------------------------------------------------------
+
     prof_env_start = time.time()
 
-    # **LAYER 3: LOCAL ENVIRONMENT CELLS** (visited/blocked/unvisited in FOV)
     if env is not None:
+
         cos_yaw = math.cos(env.origin_yaw)
         sin_yaw = math.sin(env.origin_yaw)
         half_size = env.cell_size / 2.0
 
-        visited_lines = add_marker(
+        visited_lines = add_marker_fixed(
             'local_cells_visited',
+            6,
             Marker.LINE_LIST,
             rgba(0.0, 0.5, 0.0, 0.85),
             0.05,
@@ -675,8 +726,9 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             0.0
         )
 
-        blocked_lines = add_marker(
+        blocked_lines = add_marker_fixed(
             'local_cells_blocked',
+            7,
             Marker.LINE_LIST,
             rgba(0.7, 0.0, 0.0, 0.85),
             0.05,
@@ -684,8 +736,9 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             0.0
         )
 
-        unvisited_lines = add_marker(
+        unvisited_lines = add_marker_fixed(
             'local_cells_unvisited',
+            8,
             Marker.LINE_LIST,
             rgba(0.5, 0.5, 0.5, 0.55),
             0.03,
@@ -693,8 +746,9 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             0.0
         )
 
-        explored_lines = add_marker(
+        explored_lines = add_marker_fixed(
             'local_cells_explored_sides',
+            9,
             Marker.LINE_LIST,
             rgba(1.0, 0.0, 0.0, 0.9),
             0.05,
@@ -706,15 +760,17 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
 
         for row in range(env.rows):
             for col in range(env.cols):
-                center = env.get_world_position_from_cell(row, col)
 
+                center = env.get_world_position_from_cell(row, col)
                 if center is None:
                     continue
 
                 cell_x, cell_y = center
 
-                # **LIMITED FOV**: Only cells within 4 meters
-                if abs(cell_x - robot_x) > local_radius or abs(cell_y - robot_y) > local_radius:
+                if (
+                    abs(cell_x - robot_x) > local_radius or
+                    abs(cell_y - robot_y) > local_radius
+                ):
                     continue
 
                 corners_grid = [
@@ -765,8 +821,17 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             for (sx, sy), (ex, ey) in explored_segments:
                 explored_lines.points.append(pt(sx, sy, 0.05))
                 explored_lines.points.append(pt(ex, ey, 0.05))
+    else:
+        add_marker_fixed('local_cells_visited', 6, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_blocked', 7, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_unvisited', 8, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.03, 0.0, 0.0, action=Marker.DELETE)
+        add_marker_fixed('local_cells_explored_sides', 9, Marker.LINE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.05, 0.0, 0.0, action=Marker.DELETE)
 
     prof_env_time = time.time() - prof_env_start
+
+    # ------------------------------------------------------------------
+    # Persistent cumulative observed grid
+    # ------------------------------------------------------------------
 
     prof_cumulative_start = time.time()
 
@@ -780,50 +845,80 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
         else 0.1
     )
 
+    # ------------------------------------------------------------------
+    # Obstacles
+    # ------------------------------------------------------------------
+
     if GLOBAL_OBSERVED_OBSTACLES:
-        persistent_obstacle_cubes = add_marker(
+        persistent_obstacle_cubes = add_marker_fixed(
             'persistent_observed_obstacles',
+            10,
             Marker.CUBE_LIST,
-            rgba(1.0, 0.0, 0.0, 0.7),
+            rgba(1.0, 0.0, 0.0, 0.35),  # transparent
             persistent_resolution,
             persistent_resolution,
             0.01
         )
 
-        for wx, wy, _ in GLOBAL_OBSERVED_OBSTACLES:
-            persistent_obstacle_cubes.points.append(pt(wx, wy, 0.0))
+        persistent_obstacle_cubes.points = [
+            pt(wx, wy, 0.0)
+            for wx, wy, _ in GLOBAL_OBSERVED_OBSTACLES
+        ]
+    else:
+        add_marker_fixed('persistent_observed_obstacles', 10, Marker.CUBE_LIST, rgba(0.0, 0.0, 0.0, 0.0), persistent_resolution, persistent_resolution, 0.01, action=Marker.DELETE)
+
+    # ------------------------------------------------------------------
+    # Padding
+    # ------------------------------------------------------------------
 
     if GLOBAL_OBSERVED_PADDING:
-        persistent_padding_cubes = add_marker(
+        persistent_padding_cubes = add_marker_fixed(
             'persistent_observed_padding',
+            11,
             Marker.CUBE_LIST,
-            rgba(1.0, 1.0, 0.0, 0.6),
+            rgba(1.0, 1.0, 0.0, 0.35),
             persistent_resolution,
             persistent_resolution,
             0.01
         )
 
-        for wx, wy, _ in GLOBAL_OBSERVED_PADDING:
-            persistent_padding_cubes.points.append(pt(wx, wy, 0.0))
+        persistent_padding_cubes.points = [
+            pt(wx, wy, 0.0)
+            for wx, wy, _ in GLOBAL_OBSERVED_PADDING
+        ]
+    else:
+        add_marker_fixed('persistent_observed_padding', 11, Marker.CUBE_LIST, rgba(0.0, 0.0, 0.0, 0.0), persistent_resolution, persistent_resolution, 0.01, action=Marker.DELETE)
+
+    # ------------------------------------------------------------------
+    # Free space
+    # ------------------------------------------------------------------
 
     if GLOBAL_OBSERVED_FREE:
-        persistent_free_cubes = add_marker(
+        persistent_free_cubes = add_marker_fixed(
             'persistent_observed_free',
+            12,
             Marker.CUBE_LIST,
-            rgba(0.2, 0.8, 0.2, 0.4),
+            rgba(0.2, 0.8, 0.2, 0.35),
             persistent_resolution,
             persistent_resolution,
             0.01
         )
 
-        for wx, wy, _ in GLOBAL_OBSERVED_FREE:
-            persistent_free_cubes.points.append(pt(wx, wy, 0.0))
+        persistent_free_cubes.points = [
+            pt(wx, wy, 0.0)
+            for wx, wy, _ in GLOBAL_OBSERVED_FREE
+        ]
+    else:
+        add_marker_fixed('persistent_observed_free', 12, Marker.CUBE_LIST, rgba(0.0, 0.0, 0.0, 0.0), persistent_resolution, persistent_resolution, 0.01, action=Marker.DELETE)
 
     prof_cumulative_time = time.time() - prof_cumulative_start
 
+    # ------------------------------------------------------------------
+    # Candidates
+    # ------------------------------------------------------------------
+
     prof_cand_start = time.time()
 
-    # Draw candidates
     rejected = []
     valid = []
 
@@ -832,8 +927,10 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
         valid = list(candidates.get('valid', []))
 
     if rejected:
-        m = add_marker(
+
+        m = add_marker_fixed(
             'local_candidates_rejected',
+            30,
             Marker.POINTS,
             rgba(1.0, 0.0, 0.0, 1.0),
             0.14,
@@ -841,11 +938,18 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             0.01
         )
 
-        m.points = [pt(px, py, 0.06) for px, py in rejected]
+        m.points = [
+            pt(px, py, 0.06)
+            for px, py in rejected
+        ]
+    else:
+        add_marker_fixed('local_candidates_rejected', 30, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), 0.14, 0.14, 0.01, action=Marker.DELETE)
 
     if valid:
-        m = add_marker(
+
+        m = add_marker_fixed(
             'local_candidates_valid',
+            31,
             Marker.POINTS,
             rgba(1.0, 0.9, 0.0, 0.9),
             0.12,
@@ -853,98 +957,18 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             0.01
         )
 
-        m.points = [pt(px, py, 0.06) for px, py in valid]
-
-    prof_cand_time = time.time() - prof_cand_start
-
-    # Robot marker - LOCAL/TRANSITORY
-    robot_marker = add_marker(
-        'local_robot_pose',
-        Marker.SPHERE,
-        rgba(0.0, 0.1, 1.0, 0.95),
-        0.28,
-        0.28,
-        0.16
-    )
-
-    robot_marker.pose.position = pt(robot_x, robot_y, 0.10)
-
-    # Target marker - LOCAL/TRANSITORY
-    if chosen_point is not None:
-        tx, ty = chosen_point
-
-        target = add_marker(
-            'local_chosen_target',
-            Marker.SPHERE,
-            rgba(0.0, 0.9, 0.0, 1.0),
-            0.30,
-            0.30,
-            0.20
-        )
-
-        target.pose.position = pt(tx, ty, 0.10)
-
-        target_line = add_marker(
-            'local_target_segment',
-            Marker.LINE_STRIP,
-            rgba(0.0, 0.8, 0.0, 0.95),
-            0.05,
-            0.0,
-            0.0
-        )
-
-        target_line.points = [
-            pt(robot_x, robot_y, 0.05),
-            pt(tx, ty, 0.05)
+        m.points = [
+            pt(px, py, 0.06)
+            for px, py in valid
         ]
+    else:
+        add_marker_fixed('local_candidates_valid', 31, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), 0.12, 0.12, 0.01, action=Marker.DELETE)
 
-        dist = math.hypot(tx - robot_x, ty - robot_y)
+    # ...existing code...
 
-        label = add_marker(
-            'local_target_distance',
-            Marker.TEXT_VIEW_FACING,
-            rgba(0.0, 0.4, 0.0, 1.0),
-            0.0,
-            0.0,
-            0.22
-        )
-
-        label.pose.position = pt(
-            (robot_x + tx) / 2.0,
-            (robot_y + ty) / 2.0,
-            0.22
-        )
-
-        label.text = f"{dist:.2f}m"
-
-    # Info - LOCAL/TRANSITORY
-    info = add_marker(
-        'local_iteration_info',
-        Marker.TEXT_VIEW_FACING,
-        rgba(0.1, 0.1, 0.1, 0.95),
-        0.0,
-        0.0,
-        0.24
-    )
-
-    info.pose.position = pt(robot_x, robot_y + 0.45, 0.28)
-
-    grid_source = (
-        "SDF"
-        if (
-            local_distance is not None and
-            hasattr(local_distance, 'obstacle_grid') and
-            local_distance.obstacle_grid is not None
-        )
-        else "SLAM"
-    )
-
-    info.text = (
-        f"iter={iteration} "
-        f"valid={len(valid)} "
-        f"rejects={len(rejected)} "
-        f"[{grid_source}]"
-    )
+    # ------------------------------------------------------------------
+    # Publish
+    # ------------------------------------------------------------------
 
     prof_pub_start = time.time()
 
@@ -954,15 +978,19 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
 
     viz_total_time = time.time() - viz_start_time
 
-    # Log profiling data every 10 iterations
+    # ------------------------------------------------------------------
+    # Profiling logs
+    # ------------------------------------------------------------------
+
     if iteration % 10 == 0:
+
         node.get_logger().info(
             f"[VIZ PROFILE] iter={iteration} | "
             f"global={prof_global_time*1000:.2f}ms "
             f"sdf={prof_sdf_time*1000:.2f}ms "
             f"env={prof_env_time*1000:.2f}ms "
             f"cumul={prof_cumulative_time*1000:.2f}ms "
-            f"cand={prof_cand_time*1000:.2f}ms "
+            f"cand={prof_env_time*1000:.2f}ms "
             f"pub={prof_pub_time*1000:.2f}ms "
             f"TOTAL={viz_total_time*1000:.2f}ms "
             f"markers={len(marker_array.markers)} "
@@ -971,6 +999,7 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
             f"pad={len(GLOBAL_OBSERVED_PADDING)}, "
             f"free={len(GLOBAL_OBSERVED_FREE)})"
         )
+
 
 
 
@@ -1012,8 +1041,7 @@ def attempt_enter_cell_from_position(node, env, target_row, target_col, mission_
             {'rejected': rejected_samples, 'valid': []},
             None,
             iteration,
-            env=env,
-            slam_helper=helper
+            env=env
         )
         prof_viz_time = time.time() - prof_viz_start
         
@@ -1032,8 +1060,7 @@ def attempt_enter_cell_from_position(node, env, target_row, target_col, mission_
         {'rejected': rejected_samples, 'valid': valid_samples},
         (target_x, target_y),
         iteration,
-        env=env,
-        slam_helper=helper
+        env=env
     )
     prof_viz_time = time.time() - prof_viz_start
 
