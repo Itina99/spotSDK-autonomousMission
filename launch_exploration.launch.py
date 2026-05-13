@@ -10,7 +10,8 @@ def generate_launch_description():
     # =========================
     # 📁 PATH
     # =========================
-    workspace_dir = '/data/itina99/Progetti/spotSDK-autonomousMission'
+    # Ottieni la directory del file di lancio (portatile su qualsiasi PC)
+    workspace_dir = os.path.dirname(os.path.abspath(__file__))
     odom_to_tf_script = os.path.join(workspace_dir, 'odom_to_tf.py')
     wait_for_map_script = os.path.join(workspace_dir, 'wait_for_map.py')
     rviz_config_file = os.path.join(workspace_dir, 'RvizConfig', 'spotConfig.rviz')

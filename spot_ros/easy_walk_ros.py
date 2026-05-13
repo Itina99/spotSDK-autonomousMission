@@ -964,7 +964,68 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
     else:
         add_marker_fixed('local_candidates_valid', 31, Marker.POINTS, rgba(0.0, 0.0, 0.0, 0.0), 0.12, 0.12, 0.01, action=Marker.DELETE)
 
-    # ...existing code...
+    # ------------------------------------------------------------------
+    # Chosen point (green circle) and waypoint path
+    # ------------------------------------------------------------------
+
+    if chosen_point is not None:
+        tx, ty = chosen_point
+        # Visualize chosen point as a small green sphere (pallino)
+        chosen_sphere = add_marker_fixed(
+            'chosen_target_static',
+            50,
+            Marker.SPHERE,
+            rgba(0.0, 1.0, 0.0, 1.0),  # Green
+            0.15,  # Diameter: 15cm
+            0.15,
+            0.15
+        )
+        chosen_sphere.pose.position = pt(tx, ty, 0.10)
+
+        # Draw line from robot to chosen point
+        target_line = add_marker_fixed(
+            'target_line_static',
+            51,
+            Marker.LINE_STRIP,
+            rgba(0.0, 1.0, 0.0, 0.9),
+            0.03,  # Line width
+            0.0,
+            0.0
+        )
+        target_line.points = [pt(robot_x, robot_y, 0.05), pt(tx, ty, 0.05)]
+    else:
+        add_marker_fixed('chosen_target_static', 50, Marker.SPHERE, rgba(0.0, 0.0, 0.0, 0.0), 0.15, 0.15, 0.15, action=Marker.DELETE)
+        add_marker_fixed('target_line_static', 51, Marker.LINE_STRIP, rgba(0.0, 0.0, 0.0, 0.0), 0.03, 0.0, 0.0, action=Marker.DELETE)
+
+    # Draw waypoint path
+    if env is not None and hasattr(env, 'waypoints') and len(env.waypoints) > 1:
+        waypoint_path = add_marker_fixed(
+            'waypoint_path',
+            52,
+            Marker.LINE_STRIP,
+            rgba(0.0, 0.7, 1.0, 0.8),  # Light blue
+            0.06,  # Line width
+            0.0,
+            0.0
+        )
+        waypoint_path.points = [pt(wx, wy, 0.08) for wx, wy in env.waypoints]
+    else:
+        add_marker_fixed('waypoint_path', 52, Marker.LINE_STRIP, rgba(0.0, 0.0, 0.0, 0.0), 0.06, 0.0, 0.0, action=Marker.DELETE)
+
+    # Draw waypoint markers (blue dots at each waypoint)
+    if env is not None and hasattr(env, 'waypoints') and len(env.waypoints) > 0:
+        waypoint_markers = add_marker_fixed(
+            'waypoint_points',
+            53,
+            Marker.SPHERE_LIST,
+            rgba(0.0, 0.0, 1.0, 0.95),  # Blue
+            0.12,  # Diameter: 12cm
+            0.12,
+            0.12
+        )
+        waypoint_markers.points = [pt(wx, wy, 0.08) for wx, wy in env.waypoints]
+    else:
+        add_marker_fixed('waypoint_points', 53, Marker.SPHERE_LIST, rgba(0.0, 0.0, 0.0, 0.0), 0.12, 0.12, 0.12, action=Marker.DELETE)
 
     # ------------------------------------------------------------------
     # Publish
@@ -1189,7 +1250,7 @@ class EasyWalkROSNode(Node):
         
         # Initialize static grid from SDF (for LOS checking - BACKUP/VERIFICATION)
         try:
-            static_cache = load_static_grid('/data/itina99/spot_sim_ws/worlds/test.sdf')
+            static_cache = load_static_grid('worlds/test.sdf')
             self.local_distance = LocalDistanceField(static_cache)
             self.get_logger().info('[EasyWalkROS] Static grid loaded from SDF')
         except Exception as e:
