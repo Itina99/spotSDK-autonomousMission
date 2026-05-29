@@ -36,41 +36,66 @@ GLOBAL_OBSERVED_FREE = set()
 def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0):
     """
     Check if there's a clear line of sight between two points.
+    Uses sampling along the line to check for obstacles.
 
-    ROS adaptation: if `pts` is an OccupancyGridHelper, sample the grid directly.
-    Otherwise fall back to nearest-point lookup (SDK-like behavior).
+    Uses the obstacle_distance grid where:
+        dist < threshold -> blocked
+        dist >= threshold -> passable
+
+    Args:
+        x1, y1: Start coordinates (robot position)
+        x2, y2: End coordinates (target point)
+        pts: Grid points array from obstacle_distance grid
+        cells: obstacle_distance values per cell
+        obstacle_threshold: Cells with distance strictly less than this value are
+                            considered blocked. Default 0.0 = zero padding.
+
+    Returns:
+        bool: True if path is clear, False if blocked
     """
     distance = math.hypot(x2 - x1, y2 - y1)
     num_checks = max(10, int(distance * 10))
-    #### da valutare se piallarla ####
-    if hasattr(pts, 'world_to_map'):
-        helper = pts
-        for i in range(num_checks):
-            t = i / max(1, num_checks - 1)
-            check_x = x1 + t * (x2 - x1)
-            check_y = y1 + t * (y2 - y1)
-            map_idx = helper.world_to_map(check_x, check_y)
-            if map_idx is None:
-                return False
-            mx, my = map_idx
-            if cells[my * helper.width + mx] < obstacle_threshold:
-                return False
-        return True
 
-    ##### Da capire perchè fa sta cosa quando potrei usare direttamente pts. Controllare formato####
+    # Convert pts to numpy array if needed (SDK-compatible)
     pts_np = np.asarray(pts)
-    #######################
+
     for i in range(num_checks):
         t = i / max(1, num_checks - 1)
         check_x = x1 + t * (x2 - x1)
         check_y = y1 + t * (y2 - y1)
+
+        # Find nearest grid point
         distances = np.sqrt((pts_np[:, 0] - check_x) ** 2 + (pts_np[:, 1] - check_y) ** 2)
         nearest_idx = int(np.argmin(distances))
+
+        # Blocked only when strictly inside an obstacle (dist < threshold)
         if cells[nearest_idx] < obstacle_threshold:
             return False
 
     return True
 
+def get_pts_and_cells_from_local_distance(local_distance):
+    """
+    Extract pts (grid points) and cells (obstacle distances) from LocalDistanceField.
+
+    This allows find_best_point_in_cell() to be called with the SDK-compatible signature.
+
+    Args:
+        local_distance: LocalDistanceField instance
+
+    Returns:
+        tuple: (pts, cells_obstacle_dist) compatible with SDK signature
+        or (None, None) if local_distance is unavailable
+    """
+    if local_distance is None:
+        return None, None
+
+    if local_distance.obstacle_grid is None:
+        return None, None
+
+    # Use the to_points_and_cells() method of ObstacleGrid
+    pts, cells = local_distance.obstacle_grid.to_points_and_cells()
+    return pts, cells
 
 def check_line_of_sight_static(x1, y1, x2, y2, local_distance):
     """
@@ -100,7 +125,6 @@ def check_line_of_sight_static(x1, y1, x2, y2, local_distance):
 
     return True
 
-
 def sample_cell_points(env, cell_row, cell_col, num_samples=200):
     """Sample random points within a cell (ROS version)."""
     world_pos = env.get_world_position_from_cell(cell_row, cell_col)
@@ -127,14 +151,20 @@ def sample_cell_points(env, cell_row, cell_col, num_samples=200):
 
     return samples
 
-
-def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist, local_distance=None):
+def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist):
     """Find the closest valid point to the cell center with clear LOS.
 
-    **STRATEGIC HYBRID APPROACH**:
-    - Use SLAM grid (pts/cells) for sampling and initial validation
-    - Use SDF static grid (local_distance) for critical line-of-sight checks to avoid collisions
-    - If SDF unavailable, fall back to SLAM completely
+    **IDENTICA ALLA VERSIONE SDK** - fully compatible signature.
+
+    Args:
+        robot_x, robot_y: Current robot position
+        env: EnvironmentMap instance
+        cell_row, cell_col: Target cell coordinates
+        pts: Grid points array from obstacle_distance grid
+        cells_obstacle_dist: Cell values from obstacle_distance grid
+
+    Returns:
+        tuple: (best_x, best_y, valid_samples, rejected_samples) or (None, None, [], [])
     """
     sampled_points = sample_cell_points(env, cell_row, cell_col, num_samples=100)
     if not sampled_points:
@@ -148,21 +178,9 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     valid_samples = []
     rejected_samples = []
 
-    # Strategy: Use SDF for critical LOS verification if available, else fall back to SLAM
+    # Check each sampled point using check_line_of_sight (SDK-compatible)
     for sample_x, sample_y in sampled_points:
-        is_valid = False
-
-        if local_distance is not None:
-            # PREFER: Static grid SDF for precise obstacle avoidance
-            if local_distance.is_free(sample_x, sample_y, threshold=-0.15):
-                if check_line_of_sight_static(robot_x, robot_y, sample_x, sample_y, local_distance):
-                    is_valid = True
-        else:
-            # FALLBACK: SLAM grid if SDF unavailable
-            if check_line_of_sight(robot_x, robot_y, sample_x, sample_y, pts, cells_obstacle_dist, obstacle_threshold=0.15):
-                is_valid = True
-
-        if is_valid:
+        if check_line_of_sight(robot_x, robot_y, sample_x, sample_y, pts, cells_obstacle_dist, obstacle_threshold=0.15):
             valid_samples.append((sample_x, sample_y))
         else:
             rejected_samples.append((sample_x, sample_y))
@@ -180,7 +198,6 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
             best_point = (sample_x, sample_y)
 
     return best_point[0], best_point[1], valid_samples, rejected_samples
-
 
 def draw_explored_sides(segments, cell_x, cell_y, half_size, sides_status, cos_yaw, sin_yaw):
     """Collect segments for explored cell sides (RViz line list)."""
@@ -206,7 +223,6 @@ def draw_explored_sides(segments, cell_x, cell_y, half_size, sides_status, cos_y
         add_segment((-half_size + edge_inset, -half_size), (half_size - edge_inset, -half_size))
     if sides_status & 0b0001:
         add_segment((-half_size, -half_size + edge_inset), (-half_size, half_size - edge_inset))
-
 
 def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, robot_y,
                                    candidates, chosen_point, iteration, env=None, save_path=None):
@@ -245,7 +261,7 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
         marker_array.markers.append(m)
         return m
 
-    local_radius = float(getattr(node, 'viz_local_radius', 8.0))
+    local_radius = float(getattr(node, 'viz_local_radius', 2.0))
     padding_threshold = 0.15
     grid_point_scale = 0.08
 
@@ -430,8 +446,6 @@ def visualize_grid_with_candidates(pts, cells_obstacle_dist, color, robot_x, rob
     info.text = f"iter={iteration} valid={len(valid)} rejected={len(rejected)}"
 
     node.viz_pub.publish(marker_array)
-
-
 
 # Persistent visualization limits
 MAX_PERSISTENT_POINTS = 50000
@@ -1062,62 +1076,69 @@ def visualize_grid_static(local_distance, robot_x, robot_y, candidates, chosen_p
         )
 
 
-
-
 def attempt_enter_cell_from_position(node, env, target_row, target_col, mission_folder=None, iteration=0,
                                      recordingInterface=None):
-    """Attempt to enter a target cell from the current robot position (ROS version with hybrid SDF/SLAM)."""
+    """
+    Attempt to enter a target cell from the current robot position.
+    Uses static SDF grid for obstacle avoidance - fully SDK-compatible.
+    """
     cycle_start = time.time()
-    
-    if node.current_map is None:
-        node.get_logger().error('No OccupancyGrid received yet.')
+
+    # Verify SDF static grid is available
+    if node.local_distance is None:
+        node.get_logger().error('[ATTEMPT] Static SDF grid not available - cannot proceed.')
         return False
 
-    occupied_threshold = int(node.get_parameter('occupied_threshold').value)
-    
-    prof_grid_start = time.time()
-    helper, pts, cells_obstacle_dist = spotGrid_ros.create_obstacle_grid_from_occupancy(
-        node.current_map,
-        occupied_threshold=occupied_threshold,
-        treat_unknown_as_obstacle=False,
-    )
-    prof_grid_time = time.time() - prof_grid_start
-
+    # Get current robot position
     robot_x, robot_y, _, _ = spotUtils_ros.getPosition(node.pose_state)
 
-    # HYBRID: Pass both SLAM grid and SDF for intelligent obstacle validation
+    # Extract pts and cells from local_distance (SDK-compatible)
+    pts, cells_obstacle_dist = get_pts_and_cells_from_local_distance(node.local_distance)
+
+    if pts is None or cells_obstacle_dist is None:
+        node.get_logger().error('[ATTEMPT] Could not extract grid data from local_distance.')
+        return False
+
+    # Find best point in target cell using EXACT SDK signature
     prof_best_point_start = time.time()
     target_x, target_y, valid_samples, rejected_samples = find_best_point_in_cell(
-        robot_x, robot_y, env, target_row, target_col, helper, cells_obstacle_dist,
-        local_distance=node.local_distance if node.local_distance is not None else None
+        robot_x, robot_y, env, target_row, target_col,
+        pts,  # Grid points
+        cells_obstacle_dist  # Obstacle distances
     )
     prof_best_point_time = time.time() - prof_best_point_start
 
+    # Handle case where no valid point found
     if target_x is None or target_y is None:
-        print(f"[FAIL] No clear path found to cell ({target_row},{target_col}) from current position")
+        node.get_logger().warn(
+            f"[ATTEMPT] Failed to find clear path to cell({target_row},{target_col}) | "
+            f"best_pt={prof_best_point_time * 1000:.2f}ms"
+        )
+
+        # Visualize rejection
         prof_viz_start = time.time()
-        visualize_grid_static(
-            node.local_distance,
-            robot_x, robot_y,
+        visualize_grid_with_candidates(
+            pts, cells_obstacle_dist, None, robot_x, robot_y,
             {'rejected': rejected_samples, 'valid': []},
             None,
             iteration,
             env=env
         )
         prof_viz_time = time.time() - prof_viz_start
-        
+
         cycle_time = time.time() - cycle_start
-        node.get_logger().warn(
-            f"[ATTEMPT PROFILE] Failed cell({target_row},{target_col}) | "
-            f"grid={prof_grid_time*1000:.2f}ms best_pt={prof_best_point_time*1000:.2f}ms "
-            f"viz={prof_viz_time*1000:.2f}ms TOTAL={cycle_time*1000:.2f}ms"
+        node.get_logger().info(
+            f"[CYCLE PROFILE] cell({target_row},{target_col}) REJECTED | "
+            f"best_pt={prof_best_point_time * 1000:.1f}ms viz={prof_viz_time * 1000:.1f}ms "
+            f"TOTAL={cycle_time * 1000:.0f}ms"
         )
+
         return False
 
+    # Visualize valid target
     prof_viz_start = time.time()
-    visualize_grid_static(
-        node.local_distance,
-        robot_x, robot_y,
+    visualize_grid_with_candidates(
+        pts, cells_obstacle_dist, None, robot_x, robot_y,
         {'rejected': rejected_samples, 'valid': valid_samples},
         (target_x, target_y),
         iteration,
@@ -1125,42 +1146,44 @@ def attempt_enter_cell_from_position(node, env, target_row, target_col, mission_
     )
     prof_viz_time = time.time() - prof_viz_start
 
+    # Calculate target orientation
     dx = target_x - robot_x
     dy = target_y - robot_y
     target_yaw = math.atan2(dy, dx)
     current_yaw = node.pose_state.yaw()
     dyaw = math.atan2(math.sin(target_yaw - current_yaw), math.cos(target_yaw - current_yaw))
 
+    # Execute motion
     prof_motion_start = time.time()
     if not node.motion.rotate_by(dyaw):
         return False
 
     if not node.motion.move_to(target_x, target_y):
         return False
+
     prof_motion_time = time.time() - prof_motion_start
 
+    # Verify arrival at target cell
     x_final, y_final, _, _ = spotUtils_ros.getPosition(node.pose_state)
     result = env.is_point_in_cell(x_final, y_final, target_row, target_col)
-    
-    # Final profiling report
+
+    # Performance report
     cycle_time = time.time() - cycle_start
+    status = 'SUCCESS' if result else 'FAIL'
     node.get_logger().info(
-        f"[CYCLE PROFILE] cell({target_row},{target_col}) {'SUCCESS' if result else 'FAIL'} | "
-        f"grid={prof_grid_time*1000:.1f}ms best_pt={prof_best_point_time*1000:.1f}ms "
-        f"viz={prof_viz_time*1000:.1f}ms motion={prof_motion_time*1000:.0f}ms "
-        f"TOTAL={cycle_time*1000:.0f}ms"
+        f"[CYCLE PROFILE] cell({target_row},{target_col}) {status} | "
+        f"best_pt={prof_best_point_time * 1000:.1f}ms viz={prof_viz_time * 1000:.1f}ms "
+        f"motion={prof_motion_time * 1000:.0f}ms TOTAL={cycle_time * 1000:.0f}ms"
     )
-    
+
     return result
-
-
+                               
 def reset_persistent_exploration_map():
     """Reset the global exploration map (useful for starting new exploration sessions)."""
     global GLOBAL_OBSERVED_OBSTACLES, GLOBAL_OBSERVED_PADDING, GLOBAL_OBSERVED_FREE
     GLOBAL_OBSERVED_OBSTACLES.clear()
     GLOBAL_OBSERVED_PADDING.clear()
     GLOBAL_OBSERVED_FREE.clear()
-
 
 def find_new_borders(env, robot_row, robot_col, path, frontier):
     new_borders = env.get_adjacent_frontier_cells(robot_row, robot_col, path)
@@ -1181,7 +1204,7 @@ class EasyWalkROSNode(Node):
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('viz_topic', '/easy_walk/visualization')
         self.declare_parameter('viz_enabled', True)
-        self.declare_parameter('viz_local_radius', 8.0)
+        self.declare_parameter('viz_local_radius', 2.0)
         self.declare_parameter('grid_rows', 4)
         self.declare_parameter('grid_cols', 4)
         self.declare_parameter('cell_size', 2.0)
@@ -1256,22 +1279,6 @@ class EasyWalkROSNode(Node):
         except Exception as e:
             self.get_logger().warn(f'[EasyWalkROS] Static grid load failed (will use SLAM): {e}')
             self.local_distance = None
-        
-        # **GAZEBO PERFORMANCE NOTE**:
-        # Gazebo is inherently single-threaded and can be "jittery" (scattoso):
-        # - Dynamics updates occur at ~1000 Hz internally, but stability timesteps can reduce effective rate
-        # - Contact/collision calculations are computationally expensive and can cause frame drops
-        # - When multiple sensors (LIDAR, IMU, Camera) publish simultaneously, queue processing delays occur
-        # - The OccupancyGrid generation (from LIDAR + SLAM) is the bottleneck for exploration algorithms
-        #
-        # **OPTIMIZATION TIPS** for smoother performance:
-        # 1. Reduce LIDAR scan frequency (currently may be 10Hz+) to 5Hz to reduce CPU load
-        # 2. Increase Gazebo default timestep from 0.001s to 0.002s for stability (trade: less precision)
-        # 3. Reduce OccupancyGrid resolution or only publish updates on significant changes
-        # 4. Use sim_time (--clock) and control playback speed via `rosparam set /use_sim_time true`
-        # 5. Disable unnecessary sensors or run multi-GPU simulation if available
-        #
-        # In real robot (Boston Dynamics Spot): Movement is controlled via gRPC, no Gazebo overhead
 
     def _on_odom(self, msg: Odometry):
         spotUtils_ros.update_pose_from_odom(self.pose_state, msg)

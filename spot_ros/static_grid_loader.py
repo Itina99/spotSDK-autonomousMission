@@ -8,7 +8,7 @@ import os
 # Import tools module
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
-from sdf_static_grid import parse_sdf_obstacles, GridSpec, build_occupancy_grid
+from tools.sdf_static_grid import parse_sdf_obstacles, GridSpec, build_occupancy_grid
 from visualize_grid import calculate_grid_range
 
 
